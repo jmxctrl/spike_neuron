@@ -12,6 +12,7 @@ spike travesl down axon to communicate with other neuron ->
 refractory period after membrane potential 
 
 
+
 ## LIF model 
 - membrane potential V increases with input current 
 - potential "leaks" decays over time
@@ -47,3 +48,6 @@ $$
 
 When $V$ reaches a threshold, the neuron fires a spike and $V$ is reset.
 
+
+example 
+![alt text](image.png)
