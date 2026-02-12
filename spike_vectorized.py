@@ -56,8 +56,8 @@ def create_weight_matrix(N, inhibitory_ratio=0.2, seed=None):
     return W
 
 def run_vectorized_lif(
-    num_neurons = 100,
     num_steps = 100, 
+    num_neurons = 100,
     threshold = 1.0,
     reset_value = 0.0,
     tau = 20.0,
@@ -74,27 +74,34 @@ def run_vectorized_lif(
 
     # Create weight matrix for synaptic connections
     W = create_weight_matrix(num_neurons, inhibitory_ratio=0.2, seed=42)
+    
+    # Print weight matrix statistics (once, before simulation)
+    print("\n=== Weight Matrix Statistics ===")
+    print(f"Matrix shape: {W.shape}")
+    print(f"Excitatory connections: {np.sum(W > 0)} ({np.sum(W > 0) / W.size * 100:.1f}%)")
+    print(f"Inhibitory connections: {np.sum(W < 0)} ({np.sum(W < 0) / W.size * 100:.1f}%)")
+    print(f"Weight range: [{W.min():.3f}, {W.max():.3f}]")
+    print(f"\nSample weights (5x5):")
+    print(W[:5, :5].round(3))
 
     # simulation loop 
     for t in range(num_steps): 
         # Add random noise to the input current at each time step
         noise = np.random.normal(0, 0.2, num_neurons)
-        I = I_base + noise
+        
+        # Calculate synaptic input 
+        if t > 0:
+            I_synaptic = (1.0 / num_neurons) * (W @ spikes[t-1, :])  # Scale by 1/N
+        else: 
+            I_synaptic = np.zeros(num_neurons)
+        
+        I = I_base + noise + I_synaptic 
         dV = (dt / tau) * (-V + I) # change in membrane potential at this time step 
         V += dV # updates membrane potential with electrical signals
         spiked = V >= threshold # checks which neurons have reached threshold (usually boolean)
         spikes[t, spiked] = 1 # records spike that fired at this time step to 1 
         V[spiked] = reset_value # resets membrane potential to 0
         V_record[t] = V  # Record the membrane potential for all neurons
-
-        # Print weight matrix statistics
-        print("\n=== Weight Matrix Statistics ===")
-        print(f"Matrix shape: {W.shape}")
-        print(f"Excitatory connections: {np.sum(W > 0)} ({np.sum(W > 0) / W.size * 100:.1f}%)")
-        print(f"Inhibitory connections: {np.sum(W < 0)} ({np.sum(W < 0) / W.size * 100:.1f}%)")
-        print(f"Weight range: [{W.min():.3f}, {W.max():.3f}]")
-        print(f"\nSample weights (5x5):")
-        print(W[:5, :5].round(3))
 
     if plot:
         print("About to show plot")
@@ -115,6 +122,7 @@ def run_vectorized_lif(
 
 if __name__ == "__main__":
     # Set parameters for visible spiking - simulate all 100 neurons
-    run_vectorized_lif(num_neurons=100, input_current=1.0, threshold=0.1, plot=True) # measured in millivolts 
+    # Strong drive to ensure sustained activity
+    run_vectorized_lif(num_neurons=100, input_current=5.0, threshold=0.5, plot=True) # measured in millivolts 
 
 
