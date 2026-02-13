@@ -169,6 +169,21 @@ def run_vectorized_lif(
     plot=True
 ): 
 
+"""
+Run Leaky Integrate and Fire 
+
+Params: 
+    threshold: 
+    tau (τ): time constant it takes for voltage to decay of initial value (how fast neuron returns to reset)
+        tau = 20ms, voltage decays 63% in 20 milliseconds
+        i.e. dt / dau = 1.0/20.0 = 0.05 --> 5% decay rate per millisecond 
+    V: membrane voltage is mV
+    dt: time step, how much time passes between updates 
+    dv: (decay rate) * (distance from target)
+
+Return spike data and membrane voltages
+"""
+
     # initialize membrane potentials and spikes 
     V = np.zeros(num_neurons) 
     spikes = np.zeros((num_steps, num_neurons))

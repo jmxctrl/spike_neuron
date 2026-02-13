@@ -115,3 +115,11 @@ Spike Array spikes `spikes[t, i]`
 * i = neuron index 
 * Value = 1 True 0 False 
 * spikes[10, 5] = 1 means neuron 5 fired at t = 10 ms 
+
+
+## Neuromodulation 
+Classical neurotransmitters like Glutamate and GABA create the response itself. While neuromodulators modify those responses by analyzing 
+1. speed 
+2. intensity 
+3. duration 
+4. learning 
