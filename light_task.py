@@ -1,6 +1,7 @@
 from spike_vectorized import create_weight_matrix, calculate_stdp, train_with_stdp, run_vectorized_lif
 import numpy as np
 import matplotlib.pyplot as plt
+from spike_vector import rate_encode_vector 
 
 """
 Learning objective: network learns how to self drive 
@@ -92,6 +93,30 @@ def get_sensor_values(position):
 
     return [left_sensor, center_sensor, right_sensor]
 
+
+# ============================================
+# STEP 3: Encode spike values 
+# ============================================
+
+def encode_sensors_to_spikes(sensor_values, T=100, p_max=0.2):
+    """
+    convert sensors into spike using spike vector function 
+
+    Params: (
+        sensor values = left, right, center 
+        T = number of timesteps 
+        p_max = maximum spike probability 
+    )
+
+    return spike matrix 
+
+    """
+
+    spikes = rate_encode_vector(sensor_values, T=T, p_max=p_max)
+    return spikes 
+    
+
+
 # Test Step 1
 if __name__ == "__main__":
     print("=== STEP 1: Car Simulation Test ===")
@@ -116,46 +141,25 @@ if __name__ == "__main__":
     print("\n=== STEP 2: Sensor Test ===")
     
     # Test sensors at different positions
-    positions_test = [0.0, 0.6, -0.6, 0.9, -0.9]
-    for pos in positions_test:
-        sensors = get_sensor_values(pos)
-        print(f"Position {pos:5.1f} -> Left: {sensors[0]:.2f}, Center: {sensors[1]:.2f}, Right: {sensors[2]:.2f}")
-    
-    # Graph the sensor responses
-    print("\n=== Graphing Sensor Responses ===")
-    positions = np.linspace(-1.5, 1.5, 100)  # Car positions from -1.5 to 1.5
-    
-    left_values = []
-    center_values = []
-    right_values = []
-    
+    positions = [0.0, 0.6, -0.6, 0.9, -0.9]
     for pos in positions:
         sensors = get_sensor_values(pos)
-        left_values.append(sensors[0])
-        center_values.append(sensors[1])
-        right_values.append(sensors[2])
-    
-    plt.figure(figsize=(10, 6))
-    plt.plot(positions, left_values, label='Left Sensor', color='blue', linewidth=2)
-    plt.plot(positions, center_values, label='Center Sensor', color='green', linewidth=2)
-    plt.plot(positions, right_values, label='Right Sensor', color='red', linewidth=2)
-    
-    # Mark boundaries
-    plt.axvline(x=-1.0, color='black', linestyle='--', alpha=0.3, label='Lane Edges')
-    plt.axvline(x=1.0, color='black', linestyle='--', alpha=0.3)
-    plt.axvline(x=0.0, color='gray', linestyle=':', alpha=0.5, label='Center')
-    
-    plt.xlabel('Car Position', fontsize=12)
-    plt.ylabel('Sensor Value', fontsize=12)
-    plt.title('Sensor Response vs Car Position', fontsize=14)
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.xlim(-1.5, 1.5)
-    plt.ylim(-0.1, 1.1)
-    
-    plt.show()
-        sensors = get_sensor_values(pos)
         print(f"Position {pos:5.1f} -> Left: {sensors[0]:.2f}, Center: {sensors[1]:.2f}, Right: {sensors[2]:.2f}")
+    
+    print("\n=== STEP 3: Spike Encoding Test ===")
+    
+    # Test encoding sensors to spikes
+    test_position = 0.6
+    sensors = get_sensor_values(test_position)
+    print(f"\nPosition: {test_position}")
+    print(f"Sensor values: Left={sensors[0]:.2f}, Center={sensors[1]:.2f}, Right={sensors[2]:.2f}")
+    
+    spikes = encode_sensors_to_spikes(sensors, T=100, p_max=0.2)
+    print(f"\nSpike matrix shape: {spikes.shape}")
+    print(f"Spike counts: Left={spikes[0].sum()}, Center={spikes[1].sum()}, Right={spikes[2].sum()}")
+    print(f"Spike rates: Left={spikes[0].sum()/100:.2f}, Center={spikes[1].sum()/100:.2f}, Right={spikes[2].sum()/100:.2f}")
+    print(f"\nFirst 20 timesteps of spike matrix:")
+    print(spikes[:, :20])
 
 
 
