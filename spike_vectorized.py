@@ -5,9 +5,14 @@ Run this script to generate randomized, noisy action potential spikes and membra
 
 """
 import numpy as np
-import matplotlib.pyplot as plt
 import matplotlib 
-matplotlib.use('TkAgg')
+import os
+# Only use TkAgg if running directly, not when imported
+if __name__ == "__main__":
+    matplotlib.use('TkAgg')
+elif os.environ.get('MPLBACKEND') != 'Agg':
+    matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 """
 Synaptic Weights: 
