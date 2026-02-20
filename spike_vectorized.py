@@ -138,7 +138,7 @@ def train_with_stdp(num_episodes=10, num_steps=100, num_neurons=100):
     for episode in range(num_episodes):
         print(f"Episode {episode+1}/{num_episodes}")
         
-        spikes, voltages = run_vectorized_lif(
+        spikes, voltages, pathways = run_vectorized_lif(
             W=W,
             num_steps=num_steps,  # Fixed typo: was numsteps
             num_neurons=num_neurons, 
@@ -160,7 +160,7 @@ def train_with_stdp(num_episodes=10, num_steps=100, num_neurons=100):
         print(f"  W range: [{W.min():.3f}, {W.max():.3f}]")
         print(f"  W mean (exc): {W[excitatory_mask].mean():.3f}, W mean (inh): {W[inhibitory_mask].mean():.3f}")
 
-    return W, spikes, voltages
+    return W, spikes, voltages, pathways
 
 def run_vectorized_lif(
     W=None,  # Optional: pass in weight matrix for training
@@ -194,6 +194,7 @@ def run_vectorized_lif(
     spikes = np.zeros((num_steps, num_neurons))
     I_base = np.full(num_neurons, input_current)
     V_record = np.zeros((num_steps, num_neurons))  # To record membrane potential over time
+    pathway_history = np.zeros((num_steps, num_neurons))  # Track active pathways
 
     # Create weight matrix if not provided
     if W is None:
@@ -219,6 +220,7 @@ def run_vectorized_lif(
         # Calculate synaptic input 
         if t > 0:
             I_synaptic = (1.0 / num_neurons) * (W @ spikes[t-1, :])  # Scale by 1/N
+            pathway_history[t] = I_synaptic  # Track active pathways
         else: 
             I_synaptic = np.zeros(num_neurons)
         
@@ -246,17 +248,25 @@ def run_vectorized_lif(
         plt.tight_layout()
         plt.show()
     
-    return spikes, V_record  # Return spike data and membrane voltages
+    return spikes, V_record, pathway_history  # Return spike data, membrane voltages, and active pathways
 
 
 if __name__ == "__main__":
     # Train network with STDP
     print("=== Training Network with STDP ===")
-    trained_W, final_spikes, final_voltages = train_with_stdp(
+    trained_W, final_spikes, final_voltages, final_pathways = train_with_stdp(
         num_episodes=5,
         num_steps=100,
         num_neurons=100
     )
+    
+    # Test pathway tracking
+    print("\n=== Pathway History Test ===")
+    print(f"Pathway history shape: {final_pathways.shape}")
+    print(f"Pathway history range: [{final_pathways.min():.4f}, {final_pathways.max():.4f}]")
+    print(f"Sample pathways at t=50:")
+    print(f"  Neurons 0-5: {final_pathways[50, 0:5]}")
+    print(f"Non-zero pathways: {np.count_nonzero(final_pathways)} / {final_pathways.size}")
     
     # Visualize final trained network
     print("\n=== Final Trained Network ===")
