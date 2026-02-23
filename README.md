@@ -1,4 +1,4 @@
-this readme is intended for personal stream of thoughts 
+this readme is intended for personal stream of thoughts https://hackmd.io/@S6bykdDqSNCB7m5UZ34uTw/SkW6dFLdZl
 
 ## basic neuroscience 
 main components: 
