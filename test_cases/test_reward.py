@@ -1,6 +1,4 @@
 """Test reward_calculator function with various scenarios"""
-import sys
-sys.path.append('/Users/chubee/Documents/Neuro-Encoder')
 
 from light_task import CarState
 from neuromodulation import reward_calculator

@@ -65,3 +65,62 @@ def reward_calculator(car_state, action, prev_action=0):
 
     return reward 
     
+def apply_dopamine(
+    weights, 
+    eligibility_traces, 
+    reward,
+    baseline=0.0, 
+    learning_rate=0.01):
+    """
+    Apply dopamine-modulated plasticity to synaptic weights
+    Params:
+        weights: (N, N) array - current synaptic weight matrix
+        eligibility_traces: (N, N) array - was this synapse recently active / which synapse gets credit when reward arrives 
+        reward: float - reward signal from environment
+        baseline: float - expected reward (for calculating prediction error)
+        learning_rate: float - learning rate scaling factor
+    Returns:
+        updated_weights: (N, N) array
+        dopamine: float - reward prediction error signal
+    """
+
+    # Edge case 1: Shape mismatch
+    assert weights.shape == eligibility_traces.shape, \
+        f"Shape mismatch: weights {weights.shape} vs eligibility {eligibility_traces.shape}"
+    
+    # Edge case 2: Invalid reward values
+    assert np.isfinite(reward), f"Reward is not finite: {reward}"
+    
+    # Calculate dopamine (RPE)
+    dopamine = reward - baseline 
+    
+    # Three-factor learning rule
+    weight_update = eligibility_traces * dopamine * learning_rate 
+    
+    # Edge case 3: Clip weights to prevent explosion
+    updated_weights = np.clip(weights + weight_update, 0.0, 10.0)
+    
+    return updated_weights, dopamine 
+    
+
+def compute_eligibility_traces(spike_history, decay_rate=0.95):
+    """
+    compute eligibility traces from the spike histories, of which neuron
+        Params: 
+            spike_history: (T, N) array - spike data over time
+            decay_rate: float - how fast traces decay (default 0.95)
+    Returns:
+        eligibility: (N, N) array - final eligibility trace matrix
+    """
+    T, N = spike_history.shape # T timesteps, N neurons 
+    eligibility = np.zeros((N, N))
+
+    for t in range(T):
+        spikes = spike_history[t, :]
+        pre_post_product = spikes[:, np.newaxis] * spikes[np.newaxis, :]
+        #shape: (N, 1) * (1, N) = (N, N)
+
+        eligibility += pre_post_product 
+        eligibility *= decay_rate 
+
+    return eligibility
