@@ -64,51 +64,39 @@ def reward_calculator(car_state, action, prev_action=0):
     reward -= action_change * 0.05 
 
     return reward 
-    
-def apply_dopamine(
-    weights, 
-    eligibility_traces, 
-    reward,
-    baseline=0.0, 
-    learning_rate=0.01):
-    """
-    Apply dopamine-modulated plasticity to synaptic weights
-    Params:
-        weights: (N, N) array - current synaptic weight matrix
-        eligibility_traces: (N, N) array - was this synapse recently active / which synapse gets credit when reward arrives 
-        reward: float - reward signal from environment
-        baseline: float - expected reward (for calculating prediction error)
-        learning_rate: float - learning rate scaling factor
-    Returns:
-        updated_weights: (N, N) array
-        dopamine: float - reward prediction error signal
-    """
 
-    # Edge case 1: Shape mismatch
-    assert weights.shape == eligibility_traces.shape, \
-        f"Shape mismatch: weights {weights.shape} vs eligibility {eligibility_traces.shape}"
-    
-    # Edge case 2: Invalid reward values
-    assert np.isfinite(reward), f"Reward is not finite: {reward}"
-    
-    # Calculate dopamine (RPE)
-    dopamine = reward - baseline 
-    
-    # Three-factor learning rule
-    weight_update = eligibility_traces * dopamine * learning_rate 
-    
-    # Edge case 3: Clip weights to prevent explosion
-    updated_weights = np.clip(weights + weight_update, 0.0, 10.0)
-    
-    return updated_weights, dopamine 
-    
-
-def compute_eligibility_traces(spike_history, decay_rate=0.95):
+def compute_stdp_eligibility(
+    spike_history, 
+    tau_plus=20,
+    A_plus=1.0,
+    decay_rate=0.95,
+    ):
     """
     compute eligibility traces from the spike histories, of which neuron
+
+        Calculation: 
+            Δwij = A+ * e^-(Δt/τ) -- synaptic weight from neuron i to neuron j 
+                A+ = maximum strengthening amount 
+                Δt/τ = how many τ passed 
+                e^(Δt/τ) = long term depression 
+
+            eij(T) = 
+                summation of alpha ^ T-t' from 0 to t
+                summation of delta t - tau_plus 
+                    pre_spike[i] = s_i(t - dt)
+                    post_spike[j] = s_j(t)
+                    STDP weights for the time gap  = Δwij
+
         Params: 
             spike_history: (T, N) array - spike data over time
+            tau_plus: causal relationship if fired within last t timesteps 
+            A_plus: how much connection to strengthen 
             decay_rate: float - how fast traces decay (default 0.95)
+
+        Goal: 
+            for each synapse i->j, calculate how much to strengthen 
+                - did neuron i fire before j (causal relationship)
+                - how close in time (exponential decay)
     Returns:
         eligibility: (N, N) array - final eligibility trace matrix
     """
@@ -116,11 +104,92 @@ def compute_eligibility_traces(spike_history, decay_rate=0.95):
     eligibility = np.zeros((N, N))
 
     for t in range(T):
-        spikes = spike_history[t, :]
-        pre_post_product = spikes[:, np.newaxis] * spikes[np.newaxis, :]
-        #shape: (N, 1) * (1, N) = (N, N)
+        post_spikes = spike_history[t, :] # spiked now 
 
-        eligibility += pre_post_product 
+        # look backwards for pre-synaptic spikes 
+        for dt in range(1, tau_plus + 1):
+            if t - dt >= 0:
+                pre_spikes = spike_history[t-dt, :] 
+
+                # CORE: STDP weight 
+                weight = A_plus * np.exp(-dt / tau_plus)
+
+                # weighted outer spikes and eligibility 
+                update = weight * (pre_spikes[:, np.newaxis] * post_spikes[np.newaxis, :])
+                eligibility += update
+
         eligibility *= decay_rate 
 
     return eligibility
+
+
+def apply_dopamine(
+    weights, 
+    eligibility_history, 
+    reward_history,
+    baseline=0.0, 
+    baseline_lr=0.1,
+    learning_rate=0.01,
+    w_min=0.0,
+    w_max=10.0):
+    """
+    Apply dopamine-modulated plasticity to synaptic weights (batch processing)
+    
+    Params:
+        weights: (N, N) array - initial synaptic weight matrix
+        eligibility_history: (T, N, N) array - STDP eligibility traces over time
+        reward_history: (T,) array - reward signals over time
+        baseline: float - initial expected reward (for calculating prediction error)
+            baseline_new = (1 - α) * baseline_old + α * reward 
+            example: 
+                90% weight to old baseline 
+                10% weight to new reward
+        baseline_lr: float - learning rate for baseline adaptation (default 0.1)
+        learning_rate: float - learning rate scaling factor (must be >= 0)
+        w_min: float - minimum weight value (default 0.0)
+        w_max: float - maximum weight value (default 10.0)
+    
+    Returns:
+        updated_weights: (N, N) array - final weights after processing all timesteps
+        baseline: float - updated baseline after processing all rewards
+    """
+
+    # Validate inputs
+    T = len(reward_history)
+    assert len(eligibility_history) == T, \
+        f"Length mismatch: eligibility_history {len(eligibility_history)} vs reward_history {T}"
+    
+    assert eligibility_history.shape[1:] == weights.shape, \
+        f"Shape mismatch: eligibility {eligibility_history.shape[1:]} vs weights {weights.shape}"
+    
+    # Edge case 2: Invalid reward values
+    assert np.all(np.isfinite(reward_history)), "Reward history contains NaN or Inf"
+    
+    # Edge case 3: Check eligibility for invalid values
+    assert np.all(np.isfinite(eligibility_history)), "Eligibility history contains NaN or Inf"
+    
+    # Edge case 4: Validate learning rate
+    assert learning_rate >= 0, f"Learning rate must be non-negative, got {learning_rate}"
+    
+    # Edge case 5: Validate baseline
+    assert np.isfinite(baseline), f"Baseline is not finite: {baseline}"
+    
+    # Edge case 6: Validate weight bounds
+    assert w_min < w_max, f"w_min ({w_min}) must be less than w_max ({w_max})"
+    
+    # Process each timestep
+    T = len(reward_history)
+    
+    for t in range(T):
+        # Calculate prediction error 
+        dopamine = reward_history[t] - baseline
+        
+        # Update baseline (exponential moving average)
+        baseline += baseline_lr * dopamine
+        
+        # Update weights using three-factor rule
+        weight_update = eligibility_history[t] * dopamine * learning_rate
+        weights = np.clip(weights + weight_update, w_min, w_max)
+    
+    return weights, baseline 
+
