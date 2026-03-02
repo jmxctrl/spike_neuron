@@ -1,7 +1,7 @@
 from spike_vectorized import create_weight_matrix, calculate_stdp, train_with_stdp, run_vectorized_lif
 import numpy as np
 import matplotlib.pyplot as plt
-from spike_vector import rate_encode_vector 
+from rate_encoder import rate_encode_vector 
 
 """
 Learning objective: network learns how to self drive 

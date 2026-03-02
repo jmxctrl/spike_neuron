@@ -34,34 +34,42 @@ def classify_actions(pathway_history, pool_size=33, window=10):
 
 def reward_calculator(car_state, action, prev_action=0):
     """
-    Calculate reward signal based on car performance
+    Calculate reward signal based on car performance (IMPROVED SHAPING)
         Params:
             car_state: CarState object with position, speed, crash status 
             action: current action (-1, 0, 1)
             prev_action: previous action 
     Returns: 
-        reward: float(-1000, +1.0)
+        reward: float (improved incremental feedback)
     """
     
     # check catastrophic failure 
     if car_state.is_crashed():
-        return -1000.0
-
-    # check center reward 
+        return -50.0  
+    
+    # Base survival reward (agent gets rewarded just for surviving)
+    reward = 1.0  # +1 per timestep survived
+    
+    # Strong reward for staying near center
     centering_error = car_state.get_centering()
-
-    # position = 0.0 -> centering_error 0.0 (centered, no error) -> centering score = 1.0 (High)
-    # position = 0.5 -> centering error = 0.5 (halfway to edge) -> centerng score = 0.5 (Medium)
+    # position = 0.0 -> centering_error 0.0 (centered) -> centering score = 1.0 (High)
+    # position = 0.5 -> centering error = 0.5 (halfway to edge) -> centering score = 0.5 (Medium)
     centering_score = 1.0 - centering_error 
-    reward = centering_score * 0.5 
+    reward += centering_score * 2.0  # Increased from 0.5 to 2.0 (stronger signal)
 
-    # add reward for forward progress bonus 
-    forward_score = car_state.speed * 0.1 
+    # Reward for forward progress (speed)
+    forward_score = car_state.speed * 0.2  # Increased from 0.1 to 0.2
     reward += forward_score
 
-    # penalize jerky steering 
+    # Penalize jerky steering (smooth driving)
     action_change = abs(action - prev_action)
-    reward -= action_change * 0.05 
+    reward -= action_change * 0.1  # Increased from 0.05 to 0.1 (stronger smoothness incentive)
+    
+    # Penalty for being far from center (progressive)
+    if centering_error > 0.7:  # Very close to edge
+        reward -= 2.0  # Strong penalty to discourage edge-hugging
+    elif centering_error > 0.5:  # Moderately far from center
+        reward -= 0.5  # Mild penalty
 
     return reward 
 
@@ -192,4 +200,8 @@ def apply_dopamine(
         weights = np.clip(weights + weight_update, w_min, w_max)
     
     return weights, baseline 
+
+
+
+
 

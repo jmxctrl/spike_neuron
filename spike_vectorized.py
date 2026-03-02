@@ -164,6 +164,7 @@ def train_with_stdp(num_episodes=10, num_steps=100, num_neurons=100):
 
 def run_vectorized_lif(
     W=None,  # Optional: pass in weight matrix for training
+    external_spikes=None,
     num_steps=100, 
     num_neurons=100,
     threshold=1.0,
@@ -196,7 +197,8 @@ def run_vectorized_lif(
     V_record = np.zeros((num_steps, num_neurons))  # To record membrane potential over time
     pathway_history = np.zeros((num_steps, num_neurons))  # Track active pathways
 
-    # Create weight matrix if not provided
+
+        # Create weight matrix if not provided
     if W is None:
         W = create_weight_matrix(num_neurons, inhibitory_ratio=0.2, seed=42)
     else:
@@ -231,6 +233,9 @@ def run_vectorized_lif(
         spikes[t, spiked] = 1 # records spike that fired at this time step to 1 
         V[spiked] = reset_value # resets membrane potential to 0
         V_record[t] = V  # Record the membrane potential for all neurons
+        if external_spikes is not None: 
+            num_inputs = external_spikes.shape[0]
+            spikes[t, :num_inputs] = external_spikes[:, t]
 
     if plot:
         print("About to show plot")
