@@ -5,10 +5,17 @@ import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-from light_task import get_sensor_values, encode_sensors_to_spikes, update_position, is_crashed
+import time
+from light_task import CarState, get_sensor_values, encode_sensors_to_spikes, update_position, is_crashed
+from train import load_weights, list_saved_weights
+from spike_vectorized import run_vectorized_lif
+from neuromodulation import classify_actions, reward_calculator
 
 # Page config
 st.set_page_config(page_title="Self-Driving Car", layout="wide", page_icon="🚗")
+
+# Tabs for different modes
+tab1, tab2 = st.tabs(["🎮 Manual Control", "🤖 AI Demo"])
 
 # Initialize session state
 if 'position' not in st.session_state:

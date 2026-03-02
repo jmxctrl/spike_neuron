@@ -1,4 +1,6 @@
 import numpy as np 
+import os
+from datetime import datetime
 from light_task import CarState, get_sensor_values, encode_sensors_to_spikes
 from spike_vectorized import run_vectorized_lif, create_weight_matrix
 from neuromodulation import classify_actions, reward_calculator, compute_stdp_eligibility, apply_dopamine
@@ -19,6 +21,84 @@ run_episode(): collect data
 train(): learning and orchestrating 
 
 """
+
+# ============================================
+# Save/Load Functions
+# ============================================
+
+def save_weights(weights, filename=None, reward=None):
+    """
+    Save trained weights to disk
+    
+    Params:
+        weights: (N, N) weight matrix to save
+        filename: optional custom filename. If None, generates timestamp-based name
+        reward: optional best reward to include in filename
+    
+    Returns:
+        filepath: path where weights were saved
+    """
+    if filename is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if reward is not None:
+            filename = f"weights_reward{reward:.1f}_{timestamp}.npy"
+        else:
+            filename = f"weights_{timestamp}.npy"
+    
+    # Create weights directory if it doesn't exist
+    weights_dir = "trained_weights"
+    os.makedirs(weights_dir, exist_ok=True)
+    
+    filepath = os.path.join(weights_dir, filename)
+    np.save(filepath, weights)
+    
+    print(f"Weights saved to: {filepath}")
+    return filepath
+
+
+def load_weights(filepath):
+    """
+    Load trained weights from disk
+    
+    Params:
+        filepath: path to .npy file containing weights
+    
+    Returns:
+        weights: (N, N) weight matrix
+    """
+    if not os.path.exists(filepath):
+        raise FileNotFoundError(f"Weight file not found: {filepath}")
+    
+    weights = np.load(filepath)
+    print(f"Weights loaded from: {filepath}")
+    print(f"   Shape: {weights.shape}")
+    
+    return weights
+
+
+def list_saved_weights(weights_dir="trained_weights"):
+    """
+    List all saved weight files
+    
+    Returns:
+        list of weight filenames
+    """
+    if not os.path.exists(weights_dir):
+        print(f"No weights directory found at: {weights_dir}")
+        return []
+    
+    weight_files = [f for f in os.listdir(weights_dir) if f.endswith('.npy')]
+    
+    if weight_files:
+        print(f"\n Found {len(weight_files)} saved weight file(s):")
+        for i, f in enumerate(sorted(weight_files), 1):
+            filepath = os.path.join(weights_dir, f)
+            size_kb = os.path.getsize(filepath) / 1024
+            print(f"  {i}. {f} ({size_kb:.1f} KB)")
+    else:
+        print("No saved weights found.")
+    
+    return weight_files
 
 
 def train_snn(num_episodes=100, learning_rate=0.01, baseline_lr=0.1):
@@ -141,37 +221,3 @@ def run_episode(weights, max_steps=100):
     reward_history = np.array(reward_history)  # Shape: (T,)
     
     return spike_history, reward_history, total_reward
-
-
-# ============================================
-# Test/Demo Section
-# ============================================
-
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-    
-    print("=" * 60)
-    print("TRAINING SNN TO DRIVE CAR")
-    print("=" * 60)
-    
-    # Train the agent
-    W_trained, episode_rewards = train_snn(num_episodes=500, learning_rate=0.1, baseline_lr=0.1)
-    
-    print("\n" + "=" * 60)
-    print("TRAINING COMPLETE!")
-    print("=" * 60)
-    print(f"Final episode reward: {episode_rewards[-1]:.2f}")
-    print(f"Best episode reward: {max(episode_rewards):.2f}")
-    print(f"Average reward: {np.mean(episode_rewards):.2f}")
-    
-    # Plot learning curve
-    plt.figure(figsize=(10, 6))
-    plt.plot(episode_rewards, marker='o', linewidth=2)
-    plt.xlabel('Episode', fontsize=12)
-    plt.ylabel('Total Reward', fontsize=12)
-    plt.title('SNN Training Progress: Learning to Drive', fontsize=14)
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.show()
-    
-    print("\n✓ Training visualization complete!")
