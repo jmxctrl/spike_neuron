@@ -123,6 +123,10 @@ def train_snn(num_episodes=100, learning_rate=0.01, baseline_lr=0.1):
     # Track best weights
     best_reward = -np.inf
     best_weights = W.copy()
+    
+    # Early stopping
+    patience = 100  # Stop if no improvement for 100 episodes
+    episodes_without_improvement = 0
 
     # loop through episodes 
     for episode in range(num_episodes):
@@ -153,7 +157,15 @@ def train_snn(num_episodes=100, learning_rate=0.01, baseline_lr=0.1):
         if total_reward > best_reward:
             best_reward = total_reward
             best_weights = W.copy()
+            episodes_without_improvement = 0  # Reset counter
             print(f" New best! Episode {episode}: reward={total_reward:.2f}")
+        else:
+            episodes_without_improvement += 1
+        
+        # Early stopping check
+        if episodes_without_improvement >= patience:
+            print(f"\n Early stopping at episode {episode} (no improvement for {patience} episodes)")
+            break
         
         # 6. print progress every 10 episodes
         if episode % 10 == 0:
@@ -199,6 +211,10 @@ def run_episode(weights, max_steps=100):
 
         # get action from SNN output 
         action = classify_actions(pathway_history)
+        
+        # Add exploration noise during training (10% random actions)
+        if np.random.random() < 0.1:
+            action = np.random.choice([-1, 0, 1])  # Random action
 
         # update car position -> car.update(action)
         car.update(action)

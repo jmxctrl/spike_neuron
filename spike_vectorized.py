@@ -205,14 +205,15 @@ def run_vectorized_lif(
         # Verify W has correct shape
         assert W.shape == (num_neurons, num_neurons), f"W shape {W.shape} doesn't match num_neurons {num_neurons}"
     
-    # Print weight matrix statistics (once, before simulation)
-    print("\n=== Weight Matrix Statistics ===")
-    print(f"Matrix shape: {W.shape}")
-    print(f"Excitatory connections: {np.sum(W > 0)} ({np.sum(W > 0) / W.size * 100:.1f}%)")
-    print(f"Inhibitory connections: {np.sum(W < 0)} ({np.sum(W < 0) / W.size * 100:.1f}%)")
-    print(f"Weight range: [{W.min():.3f}, {W.max():.3f}]")
-    print(f"\nSample weights (5x5):")
-    print(W[:5, :5].round(3))
+    # Print weight matrix statistics only if plot=True (debugging mode)
+    if plot:
+        print("\n=== Weight Matrix Statistics ===")
+        print(f"Matrix shape: {W.shape}")
+        print(f"Excitatory connections: {np.sum(W > 0)} ({np.sum(W > 0) / W.size * 100:.1f}%)")
+        print(f"Inhibitory connections: {np.sum(W < 0)} ({np.sum(W < 0) / W.size * 100:.1f}%)")
+        print(f"Weight range: [{W.min():.3f}, {W.max():.3f}]")
+        print(f"\nSample weights (5x5):")
+        print(W[:5, :5].round(3))
 
     # simulation loop 
     for t in range(num_steps): 
