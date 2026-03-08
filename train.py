@@ -174,7 +174,94 @@ def train_snn(num_episodes=100, learning_rate=0.01, baseline_lr=0.1):
     print(f"\n Returning BEST weights (from episode with reward={best_reward:.2f})")
     return best_weights, episode_rewards
 
-def run_episode(weights, max_steps=100):
+
+def train_snn_curriculum(num_episodes=500, learning_rate=0.1, baseline_lr=0.1):
+    """
+    progressively train SNN to drive from easy and gradually gets harder 
+
+    beginner: 
+    intermediate: 
+    advanced: 
+    """
+    # initialization 
+    W = create_weight_matrix(100)
+    baseline = 0.0
+    episode_rewards = []
+    best_reward = -np.inf
+    best_weights = W.copy()
+
+    # 3 phase curriculum 
+    curriculum = {
+        1: {'name': 'easy', 'start_range': (0.0, 0.0)}, 
+        2: {'name': 'medium', 'start_range': (-0.1, 0.1)}, 
+        3: {'name': 'hard', 'start_range': (-0.5, 0.5)}, 
+        4: {'name': 'expert', 'start_range': (-1.0, 1.0)}, 
+    }
+
+    current_phase = 1
+    phase_rewards = [] # track last 20 rewards to decide when to advance 
+
+    # run through episodes 
+    for episode in range(num_episodes):
+        pos_min, pos_max = curriculum[current_phase]['start_range']
+        if pos_min == pos_max:
+            start_pos = pos_min # always center 
+        else:
+            start_pos = np.random.uniform(pos_min, pos_max)
+
+        spike_history, reward_history, total_reward = run_episode(W, start_position=start_pos)
+
+        eligibility = compute_stdp_eligibility(spike_history)
+        T = len(reward_history)        
+        eligibility_history = np.array([eligibility] * T)  # Shape: (T, N, N)
+
+        # update weights and baseline 
+        W, baseline = apply_dopamine(
+            W, 
+            eligibility_history, 
+            reward_history, 
+            baseline, 
+            baseline_lr=baseline_lr, 
+            learning_rate=learning_rate 
+        )
+
+        # append to rewards 
+        episode_rewards.append(total_reward)
+
+        # track phase performance 
+        phase_rewards.append(total_reward)
+
+            # if len is more than 20, reevaluate 
+        if current_phase < 4 and len(phase_rewards) >= 20:
+            avg_reward = np.mean(phase_rewards[-20:])
+            if current_phase == 1 and avg_reward > 50:
+                print(f"\n🎉 Phase {current_phase} mastered! Advancing to phase {current_phase + 1}")
+                current_phase = 2
+                phase_rewards = []
+            elif current_phase == 2 and avg_reward > 30:
+                print(f"\n🎉 Phase {current_phase} mastered! Advancing to phase {current_phase + 1}")
+                current_phase = 3 
+                phase_rewards = []
+            elif current_phase == 3 and avg_reward > 40:
+                print(f"\n🎉 Phase {current_phase} mastered! Advancing to phase {current_phase + 1}")
+                current_phase = 4
+                phase_rewards = []
+
+        # print progress every 10 episodes 
+        if episode % 10 == 0:
+            print(f"Episode {episode}/{num_episodes} [Phase {current_phase}]: reward={total_reward:.2f}, baseline={baseline:.2f}")
+
+        # track best weights 
+        if total_reward > best_reward:
+            best_reward = total_reward
+            best_weights = W.copy()
+            print(f"New best! Episode {episode}: reward={total_reward:.2f}")
+
+    print(f"\n✅ Returning BEST weights (from episode with reward={best_reward:.2f})")
+    return best_weights, episode_rewards
+
+
+def run_episode(weights, max_steps=100, start_position=None):
     """
     the function collects data about the car with current weights 
 
@@ -185,7 +272,10 @@ def run_episode(weights, max_steps=100):
     return: spike_history, reward_history, total_reward 
 
     """
-    car = CarState(position=0.0, speed=0.1) # start centered 
+    if start_position is None:
+        start_position = np.random.uniform(-0.5, 0.5)
+
+    car = CarState(position=start_position) # start centered 
     
     spike_history = []
     reward_history = []
