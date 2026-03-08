@@ -9,8 +9,8 @@ if __name__ == "__main__":
     
     # Train the agent with curriculum
     W_trained, episode_rewards = train_snn_curriculum(
-        num_episodes=1000, 
-        learning_rate=0.05,  # Try 0.05 or 0.1
+        num_episodes=100, 
+        learning_rate=0.01,  # Try 0.05 or 0.1
         baseline_lr=0.1
     )
     

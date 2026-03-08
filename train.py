@@ -101,6 +101,79 @@ def list_saved_weights(weights_dir="trained_weights"):
     return weight_files
 
 
+def run_episode(weights, max_steps=100, start_position=None):
+    """
+    the function collects data about the car with current weights 
+
+    params:
+        weights
+        max steps 
+
+    return: spike_history, reward_history, total_reward 
+
+    """
+    if start_position is None:
+        start_position = np.random.uniform(-0.5, 0.5)
+
+    car = CarState(position=start_position) # start centered 
+    
+    spike_history = []
+    reward_history = []
+    eligibility_history = []
+
+    total_reward = 0.0
+    prev_action = 0 # start with straight 
+
+    for t in range(max_steps):
+        # get sensors from the car 
+        sensors = get_sensor_values(car)
+
+        # encode sensors to spikes 
+        input_spikes = encode_sensors_to_spikes(sensors, T=10, p_max=0.2)
+
+        # run SNN forward pass 
+        spikes, voltages, pathway_history = run_vectorized_lif(
+            W=weights,
+            external_spikes=input_spikes,
+            num_steps=10,
+            num_neurons=100,
+            plot=False
+        )
+
+        step_eligibility = compute_stdp_eligibility(spikes)
+        eligibility_history.append(step_eligibility)
+
+        # get action from SNN output 
+        action = classify_actions(pathway_history)
+        
+        # Add exploration noise during training (10% random actions)
+        if np.random.random() < 0.1:
+            action = np.random.choice([-1, 0, 1])  # Random action
+
+        # update car position -> car.update(action)
+        car.update(action)
+
+        # calculate reward 
+        reward = reward_calculator(car, action, prev_action)
+
+        # store data 
+        spike_history.append(spikes[-1, :]) #last row
+        reward_history.append(reward)
+        total_reward += reward 
+        prev_action = action 
+
+        # check if crashed 
+        if car.is_crashed():
+            break 
+    
+    # Convert lists to numpy arrays
+    spike_history = np.array(spike_history)  # Shape: (T, 100)
+    reward_history = np.array(reward_history)  # Shape: (T,)
+    eligibility_history = np.array(eligibility_history) # Shape: (T, N, N)
+    
+    return spike_history, reward_history, total_reward, eligibility_history
+
+
 def train_snn(num_episodes=100, learning_rate=0.01, baseline_lr=0.1):
 
     """
@@ -131,16 +204,9 @@ def train_snn(num_episodes=100, learning_rate=0.01, baseline_lr=0.1):
     # loop through episodes 
     for episode in range(num_episodes):
         # 1. run episode 
-        spike_history, reward_history, total_reward = run_episode(W)
+        spike_history, reward_history, total_reward, eligibility_history = run_episode(W)
 
-        # 2. compute eligibility 
-        eligibility = compute_stdp_eligibility(spike_history)  # Shape: (N, N)
-        
-        # Expand eligibility to match timesteps (same eligibility for all timesteps)
-        T = len(reward_history)
-        eligibility_history = np.array([eligibility] * T)  # Shape: (T, N, N)
-
-        # 3. update weights AND baseline 
+        # 2. update weights AND baseline 
         W, baseline = apply_dopamine(
             W, 
             eligibility_history, 
@@ -150,10 +216,10 @@ def train_snn(num_episodes=100, learning_rate=0.01, baseline_lr=0.1):
             learning_rate=learning_rate
         )
 
-        # 4. append to rewards 
+        # 3. append to rewards 
         episode_rewards.append(total_reward)
         
-        # 5. track best weights
+        # 4. track best weights
         if total_reward > best_reward:
             best_reward = total_reward
             best_weights = W.copy()
@@ -175,7 +241,7 @@ def train_snn(num_episodes=100, learning_rate=0.01, baseline_lr=0.1):
     return best_weights, episode_rewards
 
 
-def train_snn_curriculum(num_episodes=500, learning_rate=0.1, baseline_lr=0.1):
+def train_snn_curriculum(num_episodes=500, learning_rate=0.01, baseline_lr=0.1):
     """
     progressively train SNN to drive from easy and gradually gets harder 
 
@@ -209,11 +275,7 @@ def train_snn_curriculum(num_episodes=500, learning_rate=0.1, baseline_lr=0.1):
         else:
             start_pos = np.random.uniform(pos_min, pos_max)
 
-        spike_history, reward_history, total_reward = run_episode(W, start_position=start_pos)
-
-        eligibility = compute_stdp_eligibility(spike_history)
-        T = len(reward_history)        
-        eligibility_history = np.array([eligibility] * T)  # Shape: (T, N, N)
+        spike_history, reward_history, total_reward, eligibility_history = run_episode(W, start_position=start_pos)
 
         # update weights and baseline 
         W, baseline = apply_dopamine(
@@ -260,70 +322,3 @@ def train_snn_curriculum(num_episodes=500, learning_rate=0.1, baseline_lr=0.1):
     print(f"\n✅ Returning BEST weights (from episode with reward={best_reward:.2f})")
     return best_weights, episode_rewards
 
-
-def run_episode(weights, max_steps=100, start_position=None):
-    """
-    the function collects data about the car with current weights 
-
-    params:
-        weights
-        max steps 
-
-    return: spike_history, reward_history, total_reward 
-
-    """
-    if start_position is None:
-        start_position = np.random.uniform(-0.5, 0.5)
-
-    car = CarState(position=start_position) # start centered 
-    
-    spike_history = []
-    reward_history = []
-
-    total_reward = 0.0
-    prev_action = 0 # start with straight 
-
-    for t in range(max_steps):
-        # get sensors from the car 
-        sensors = get_sensor_values(car)
-
-        # encode sensors to spikes 
-        input_spikes = encode_sensors_to_spikes(sensors, T=10, p_max=0.2)
-
-        # run SNN forward pass 
-        spikes, voltages, pathway_history = run_vectorized_lif(
-            W=weights,
-            external_spikes=input_spikes,
-            num_steps=10,
-            num_neurons=100,
-            plot=False
-        )
-
-        # get action from SNN output 
-        action = classify_actions(pathway_history)
-        
-        # Add exploration noise during training (10% random actions)
-        if np.random.random() < 0.1:
-            action = np.random.choice([-1, 0, 1])  # Random action
-
-        # update car position -> car.update(action)
-        car.update(action)
-
-        # calculate reward 
-        reward = reward_calculator(car, action, prev_action)
-
-        # store data 
-        spike_history.append(spikes[-1, :]) #last row
-        reward_history.append(reward)
-        total_reward += reward 
-        prev_action = action 
-
-        # check if crashed 
-        if car.is_crashed():
-            break 
-    
-    # Convert lists to numpy arrays
-    spike_history = np.array(spike_history)  # Shape: (T, 100)
-    reward_history = np.array(reward_history)  # Shape: (T,)
-    
-    return spike_history, reward_history, total_reward

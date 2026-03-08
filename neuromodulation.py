@@ -27,7 +27,7 @@ def classify_actions(pathway_history, pool_size=33, window=10):
     winning_pool = np.argmax(pool_scores)
 
     # convert motor pools into actions 
-    action_map = {0: -1, 1: 0, 2: 1} # -1, 0, 1 == right center left 
+    action_map = {0: -1, 1: 0, 2: 1} 
     action = action_map[winning_pool]
 
     return action 
@@ -64,6 +64,10 @@ def reward_calculator(car_state, action, prev_action=0):
     # Penalize jerky steering (smooth driving)
     action_change = abs(action - prev_action)
     reward -= action_change * 0.1  # Increased from 0.05 to 0.1 (stronger smoothness incentive)
+
+    # penalize constant turning 
+    if action != 0: 
+        reward -= 0.05
     
     # Penalty for being far from center (progressive)
     if centering_error > 0.7:  # Very close to edge

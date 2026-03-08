@@ -30,8 +30,10 @@ selected_file = st.sidebar.selectbox(
     sorted(weights_files, reverse=True)
 )
 
+start_position = st.sidebar.slider("Starting position:", -0.5, 0.5, 0.0, 0.1)
 max_steps = st.sidebar.slider("Max steps per episode:", 50, 200, 100)
 speed = st.sidebar.slider("Simulation speed (steps/sec):", 1, 20, 10)
+explore = st.sidebar.checkbox("Enable exploration noise", value=False)
 
 # Load weights
 if st.sidebar.button("🚀 Start Demo") or 'running' in st.session_state:
@@ -43,8 +45,8 @@ if st.sidebar.button("🚀 Start Demo") or 'running' in st.session_state:
     
     st.sidebar.success(f"Loaded: {selected_file}")
     
-    # Initialize car
-    car = CarState(position=0.0)
+    # Initialize car with selected starting position
+    car = CarState(position=start_position)
     prev_action = 0
     total_reward = 0
     
@@ -72,33 +74,34 @@ if st.sidebar.button("🚀 Start Demo") or 'running' in st.session_state:
     step = 0
     
     while step < max_steps and not car.is_crashed():
-        # 1. Get sensor values (enhanced=True gives 5 sensors)
-        sensor_values = get_sensor_values(car, enhanced=True)
+        # 1. Get sensor values
+        sensor_values = get_sensor_values(car)
         
         # 2. Encode to spikes
-        input_spikes = encode_sensors_to_spikes(sensor_values, T=10)
+        input_spikes = encode_sensors_to_spikes(sensor_values, T=10, p_max=0.2)
         
-        # 3. Run SNN (returns spikes, voltages, pathway_history)
+        # 3. Run SNN
         spikes, voltages, pathway = run_vectorized_lif(
             W=W,
             external_spikes=input_spikes,
             num_steps=10,
-            input_current=5.0,
+            num_neurons=100,
             plot=False
         )
         
         pathway_history.append(pathway[-1, :])
         
         # 4. Classify action
-        if len(pathway_history) >= 10:
-            action = classify_actions(np.array(pathway_history[-10:]))
-        else:
-            action = 0
+        action = classify_actions(pathway)
         
-        # 5. Update car
+        # 5. Exploration noise (optional)
+        if explore and np.random.random() < 0.1:
+            action = np.random.choice([-1, 0, 1])
+        
+        # 6. Update car
         car.update(action)
         
-        # 6. Calculate reward
+        # 7. Calculate reward
         reward = reward_calculator(car, action, prev_action)
         total_reward += reward
         prev_action = action
@@ -168,48 +171,48 @@ if st.sidebar.button("🚀 Start Demo") or 'running' in st.session_state:
             st.markdown(f"### {action_map.get(action, 'UNKNOWN')}")
             
             # Show motor pool activities
-            if len(pathway_history) >= 10:
-                recent = np.array(pathway_history[-10:])
-                left_act = recent[:, 0:33].mean()
-                straight_act = recent[:, 33:66].mean()
-                right_act = recent[:, 66:].mean()
+            if len(pathway_history) >= 1:
+                recent = pathway_history[-1]
+                left_act = recent[0:33].mean()
+                straight_act = recent[33:66].mean()
+                right_act = recent[66:].mean()
                 
                 st.markdown("**Motor Pools:**")
-                st.progress(float(left_act / max(left_act, straight_act, right_act, 0.1)))
+                max_act = max(left_act, straight_act, right_act, 0.1)
+                st.progress(float(left_act / max_act))
                 st.caption(f"Left: {left_act:.2f}")
-                st.progress(float(straight_act / max(left_act, straight_act, right_act, 0.1)))
+                st.progress(float(straight_act / max_act))
                 st.caption(f"Straight: {straight_act:.2f}")
-                st.progress(float(right_act / max(left_act, straight_act, right_act, 0.1)))
+                st.progress(float(right_act / max_act))
                 st.caption(f"Right: {right_act:.2f}")
         
         # Visualize spike activity
         with spike_placeholder.container():
-            if len(pathway_history) > 0:
-                recent_spikes = spikes[-1, :]  # Last timestep
-                
-                # Show input neurons (sensors)
-                st.markdown("**Input Neurons (Sensors):**")
-                sensor_viz = "".join(["🟡" if s > 0 else "⚫" for s in recent_spikes[:5]])
-                st.markdown(f"`{sensor_viz}`")
-                
-                # Show motor neurons activity
-                st.markdown("**Motor Neurons (Actions):**")
-                motor_activity = pathway_history[-1]
-                
-                # Create heatmap-style visualization
-                cols = st.columns(3)
-                with cols[0]:
-                    st.caption("Left")
-                    left_heat = motor_activity[0:33].mean()
-                    st.progress(float(min(1.0, left_heat / 10)))
-                with cols[1]:
-                    st.caption("Straight")
-                    straight_heat = motor_activity[33:66].mean()
-                    st.progress(float(min(1.0, straight_heat / 10)))
-                with cols[2]:
-                    st.caption("Right")
-                    right_heat = motor_activity[66:].mean()
-                    st.progress(float(min(1.0, right_heat / 10)))
+            recent_spikes = spikes[-1, :]  # Last timestep
+            
+            # Show input neurons (sensors)
+            st.markdown("**Input Neurons (Sensors):**")
+            sensor_viz = "".join(["🟡" if s > 0 else "⚫" for s in recent_spikes[:5]])
+            st.markdown(f"`{sensor_viz}`")
+            
+            # Show motor neurons activity
+            st.markdown("**Motor Neurons (Actions):**")
+            motor_activity = pathway_history[-1]
+            
+            # Create heatmap-style visualization
+            cols = st.columns(3)
+            with cols[0]:
+                st.caption("Left")
+                left_heat = motor_activity[0:33].mean()
+                st.progress(float(min(1.0, left_heat / 10)))
+            with cols[1]:
+                st.caption("Straight")
+                straight_heat = motor_activity[33:66].mean()
+                st.progress(float(min(1.0, straight_heat / 10)))
+            with cols[2]:
+                st.caption("Right")
+                right_heat = motor_activity[66:].mean()
+                st.progress(float(min(1.0, right_heat / 10)))
         
         step += 1
         time.sleep(1.0 / speed)  # Control simulation speed

@@ -29,7 +29,7 @@ def test_trained_agent(weight_file, num_tests=5, max_steps=100):
     
     for test_num in range(num_tests):
         # Run episode without learning (just inference)
-        spike_history, reward_history, total_reward = run_episode(W, max_steps=max_steps)
+        spike_history, reward_history, total_reward, eligibility_history = run_episode(W, max_steps=max_steps)
         test_rewards.append(total_reward)
         
         num_steps = len(reward_history)
