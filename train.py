@@ -109,7 +109,7 @@ def run_episode(weights, max_steps=100, start_position=None):
         weights
         max steps 
 
-    return: spike_history, reward_history, total_reward 
+    return: spike_history, reward_history, total_reward and eligibility history 
 
     """
     if start_position is None:
