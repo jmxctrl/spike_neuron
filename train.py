@@ -100,6 +100,21 @@ def list_saved_weights(weights_dir="trained_weights"):
     
     return weight_files
 
+def lr_scheduler(current_episode, total_episodes, warmup_episodes, max_lr, min_lr):
+    """
+    schedules a warm up period and cosine decay for learning rate during training 
+
+    returns learning rate at time t 
+    """
+
+    if current_episode < warmup_episodes:
+        lr = max_lr * (current_episode / warmup_episodes)
+    else: 
+        progress = (current_episode - warmup_episodes) / (total_episodes - warmup_episodes)
+        lr = min_lr + 0.5 * (max_lr - min_lr) * (1 + np.cos(np.pi * progress))
+    
+    return lr 
+
 
 def run_episode(weights, max_steps=100, start_position=None):
     """
@@ -213,7 +228,7 @@ def train_snn(num_episodes=100, learning_rate=0.01, baseline_lr=0.1):
             reward_history, 
             baseline, 
             baseline_lr=baseline_lr, 
-            learning_rate=learning_rate
+            learning_rate=current_lr
         )
 
         # 3. append to rewards 
@@ -278,13 +293,21 @@ def train_snn_curriculum(num_episodes=500, learning_rate=0.01, baseline_lr=0.1):
         spike_history, reward_history, total_reward, eligibility_history = run_episode(W, start_position=start_pos)
 
         # update weights and baseline 
+        current_lr = lr_scheduler(
+            current_episode=episode,
+            total_episodes=num_episodes,
+            warmup_episodes=100,
+            max_lr=learning_rate,
+            min_lr=0.001
+        )
+        
         W, baseline = apply_dopamine(
             W, 
             eligibility_history, 
             reward_history, 
             baseline, 
             baseline_lr=baseline_lr, 
-            learning_rate=learning_rate 
+            learning_rate=current_lr
         )
 
         # append to rewards 
