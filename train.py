@@ -221,6 +221,16 @@ def train_snn(num_episodes=100, learning_rate=0.01, baseline_lr=0.1):
         # 1. run episode 
         spike_history, reward_history, total_reward, eligibility_history = run_episode(W)
 
+        # Calculate current learning rate with warmup + cosine annealing
+        ### NEED FIX ### 
+        current_lr = lr_scheduler(
+            current_episode=episode,
+            total_episodes=num_episodes,
+            warmup_episodes=50,
+            max_lr=learning_rate,
+            min_lr=0.0001
+        )
+
         # 2. update weights AND baseline 
         W, baseline = apply_dopamine(
             W, 
