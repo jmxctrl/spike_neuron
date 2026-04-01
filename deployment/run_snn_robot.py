@@ -9,6 +9,9 @@ import sys
 import os
 import time 
 
+# Add parent directory to path so we can import SNN modules
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from spike_vectorized import run_vectorized_lif
 from light_task import encode_sensors_to_spikes
 from neuromodulation import classify_actions
