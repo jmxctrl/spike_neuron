@@ -8,6 +8,7 @@ import numpy as np
 import sys 
 import os
 import time 
+import serial
 
 # Add parent directory to path so we can import SNN modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -34,12 +35,22 @@ class SNNController:
         print(f"✓ Initialized sensor filter (window=5)")
 
     def normalize_sensors(self, distances, max_distance=400):
-        """convert distances to [0, 1]"""
+        """ convert distances to [0, 1]"""
         return [min(d, max_distance) / max_distance for d in distances]
+
+    def action_to_command(action):
+        if action == -1:
+            return "L"
+        elif action == 0:
+            return "F"
+        elif action == 1:
+            return "R"
+        else:
+            return "S"
 
     def run_inference(self):
         # 1. read all 3 sensors returned from filtered 
-        filtered_distances = self.sensor_filter.read_all_sensors()
+        filtered_distances = self.sensor_filter.read_all_sensors_filtered()
 
         # 2. normalize all 3 sensors at once 
         normalized_inputs = self.normalize_sensors(filtered_distances)
@@ -66,8 +77,9 @@ class SNNController:
         # 3) divide neurons into 3 pools 
         #4) extracts winning pool actions      
         action = classify_actions(pathway_history)
+        command = self.action_to_command(action)
 
-        return action 
+        return action, command
 
 
     def run(self, test_mode=True, num_iterations=50):
@@ -77,8 +89,8 @@ class SNNController:
         try: 
             # loop num_iterations times 
             for i in range(num_iterations):
-                action = self.run_inference()
-                print(f"[{i+1}/{num_iterations}] Actions: {action}")
+                action, command = self.run_inference()
+                print(f"[{i+1}/{num_iterations}] Actions: {action} -> {command}")
                 time.sleep(0.2)
         except KeyboardInterrupt:
             print("\nStopped by user")
