@@ -20,6 +20,8 @@ from rasp_sensors import SensorFilter, cleanup
 
 NUM_NEURONS = 100
 NUM_STEPS = 10 
+SERIAL_PORT = "/dev/ttyACM0"
+SERIAL_BAUD = 115200
 
 class SNNController: 
     def __init__(self, weights_path):
@@ -34,11 +36,20 @@ class SNNController:
         self.sensor_filter = SensorFilter(window_size=5)
         print(f"✓ Initialized sensor filter (window=5)")
 
+        # connect to microbit via serial
+        self.ser = serial.Serial(SERIAL_PORT, SERIAL_BAUD, timeout=1)
+        time.sleep(2)  # wait for connection to stabilize
+        print(f"✓ Connected to microbit on {SERIAL_PORT}")
+
+    def send_command(self, cmd):
+        """send command to microbit via serial"""
+        self.ser.write((cmd + "\n").encode())
+
     def normalize_sensors(self, distances, max_distance=400):
         """ convert distances to [0, 1]"""
         return [min(d, max_distance) / max_distance for d in distances]
 
-    def action_to_command(action):
+    def action_to_command(self, action):
         if action == -1:
             return "L"
         elif action == 0:
@@ -84,19 +95,22 @@ class SNNController:
 
     def run(self, test_mode=True, num_iterations=50):
         """main control loop"""
-        print(f"\nRunning in {'TEST' if test_mode else 'FULL'} mode for {num_iterations} iteraitons\n")
+        print(f"\nRunning in {'TEST' if test_mode else 'FULL'} mode for {num_iterations} iterations\n")
 
         try: 
-            # loop num_iterations times 
             for i in range(num_iterations):
                 action, command = self.run_inference()
-                print(f"[{i+1}/{num_iterations}] Actions: {action} -> {command}")
+                print(f"[{i+1}/{num_iterations}] Action: {action} -> {command}")
+                self.send_command(command)
                 time.sleep(0.2)
         except KeyboardInterrupt:
             print("\nStopped by user")
 
         finally: 
-            cleanup() 
+            self.send_command("S")  # stop the robot
+            self.ser.close()
+            cleanup()
+            print("✓ Serial connection closed") 
         
     
 if __name__ == "__main__":
