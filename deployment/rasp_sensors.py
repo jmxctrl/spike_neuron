@@ -119,9 +119,15 @@ if __name__ == "__main__":
     try:
         sensor_filter = SensorFilter(window_size=5) # create median filter with window size 5
         while True:
-            filtered = sensor_filter.read_all_sensors_filtered() 
-            print(f"Left: {filtered[0]:.1f} cm | Center: {filtered[1]:.1f} cm | Right: {filtered[2]:.1f} cm")
+            filtered = sensor_filter.read_all_sensors_filtered()
+            
+            # Show buffer contents (last 5 readings) and median result
+            print(f"Left buffer:   {list(sensor_filter.left_buffer)} → Median: {filtered[0]:.1f}")
+            print(f"Center buffer: {list(sensor_filter.center_buffer)} → Median: {filtered[1]:.1f}")
+            print(f"Right buffer:  {list(sensor_filter.right_buffer)} → Median: {filtered[2]:.1f}")
+            print("-" * 60)
             time.sleep(0.5)
+            
     except KeyboardInterrupt:
         print("\nStopping...")
         cleanup()
