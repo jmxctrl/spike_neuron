@@ -1,3 +1,6 @@
 streamlit
 numpy
 matplotlib
+opencv-python
+pyserial
+scipy

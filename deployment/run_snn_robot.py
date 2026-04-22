@@ -16,6 +16,7 @@ from spike_vectorized import run_vectorized_lif
 from light_task import encode_sensors_to_spikes
 from neuromodulation import classify_actions
 from rasp_sensors import SensorFilter, cleanup
+from motor_control import MotorController
 
 NUM_NEURONS = 100
 NUM_STEPS = 10 
@@ -33,13 +34,16 @@ class SNNController:
         self.sensor_filter = SensorFilter(window_size=5)
         print(f"✓ Initialized sensor filter (window=5)")
 
+        self.motors = MotorController(port="/dev/ttyUSB0")
+        print(f"✓ Motors connected")
+
     def normalize_sensors(self, distances, max_distance=400):
         """convert distances to [0, 1]"""
         return [min(d, max_distance) / max_distance for d in distances]
 
     def run_inference(self):
         # 1. read all 3 sensors returned from filtered 
-        filtered_distances = self.sensor_filter.read_all_sensors()
+        filtered_distances = self.sensor_filter.read_all_sensors_filtered()
 
         # 2. normalize all 3 sensors at once 
         normalized_inputs = self.normalize_sensors(filtered_distances)
@@ -66,6 +70,7 @@ class SNNController:
         # 3) divide neurons into 3 pools 
         #4) extracts winning pool actions      
         action = classify_actions(pathway_history)
+        self.motors.execute_action(action) # every action gets sent to wheel 
 
         return action 
 
@@ -85,9 +90,14 @@ class SNNController:
 
         finally: 
             cleanup() 
+            self.motors.close() # stop to all 3 servos 
         
     
 if __name__ == "__main__":
-    weights_path = "../trained_weights/weights_reward267.4_20260317_160041.npy"
+    # Build path to weights file relative to this script's location
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(script_dir)
+    weights_path = os.path.join(parent_dir, "trained_weights", "weights_reward267.4_20260317_160041.npy")
+    
     controller = SNNController(weights_path)
     controller.run(test_mode=True, num_iterations=50)
