@@ -152,7 +152,7 @@ Logged every frame under:
 
 | Path | Content |
 |------|---------|
-| `observation/camera` | Live JPEG from robot (horizontally flipped) |
+| `observation/camera` | Live JPEG from robot (vertically flipped by default) |
 | `observation/distance_cm` | Ultrasonic distance |
 | `observation/line_*` | Line tracker booleans |
 | `observation/ir_*` | IR obstacle sensors |
@@ -183,10 +183,13 @@ sudo PYTHONPATH=. python3 -m yahboom.host --camera-device /dev/video0 --camera-b
 # Tuning
 sudo PYTHONPATH=. python3 -m yahboom.host --fps 30 --watchdog-ms 2000
 sudo PYTHONPATH=. python3 -m yahboom.host --no-camera
-sudo PYTHONPATH=. python3 -m yahboom.host --no-flip-camera   # disable mirror
+sudo PYTHONPATH=. python3 -m yahboom.host --camera-flip none      # raw, no correction
+sudo PYTHONPATH=. python3 -m yahboom.host --camera-flip horizontal  # mirror only
+sudo PYTHONPATH=. python3 -m yahboom.host --camera-flip both        # 180° rotation
 ```
 
-Camera feed is **horizontally flipped by default** (mirror view). Pass `--no-flip-camera` to disable.
+Camera feed is **vertically flipped by default** (fixes upside-down Pi camera mount).
+Use `--camera-flip` if orientation still looks wrong.
 
 ---
 
