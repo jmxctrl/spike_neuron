@@ -24,11 +24,26 @@ class CameraSource(Protocol):
     def close(self) -> None: ...
 
 
+def _prepare_frame(frame, flip_horizontal: bool = True):
+    if flip_horizontal:
+        frame = cv2.flip(frame, 1)
+    return frame
+
+
+def _encode_frame_b64(frame, quality: int = 75, flip_horizontal: bool = True) -> str | None:
+    frame = _prepare_frame(frame, flip_horizontal=flip_horizontal)
+    ok, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+    if not ok:
+        return None
+    return base64.b64encode(buffer).decode("utf-8")
+
+
 class _Picamera2Source:
-    def __init__(self, picam2, width: int, height: int):
+    def __init__(self, picam2, width: int, height: int, flip_horizontal: bool = True):
         self._picam2 = picam2
         self._width = width
         self._height = height
+        self._flip_horizontal = flip_horizontal
 
     def capture_jpeg_b64(self, quality: int = 75) -> str | None:
         try:
@@ -38,10 +53,7 @@ class _Picamera2Source:
             return None
         if frame is None:
             return None
-        ok, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
-        if not ok:
-            return None
-        return base64.b64encode(buffer).decode("utf-8")
+        return _encode_frame_b64(frame, quality=quality, flip_horizontal=self._flip_horizontal)
 
     def close(self) -> None:
         try:
@@ -51,18 +63,16 @@ class _Picamera2Source:
 
 
 class _V4L2Source:
-    def __init__(self, cap: cv2.VideoCapture, label: str):
+    def __init__(self, cap: cv2.VideoCapture, label: str, flip_horizontal: bool = True):
         self._cap = cap
         self._label = label
+        self._flip_horizontal = flip_horizontal
 
     def capture_jpeg_b64(self, quality: int = 75) -> str | None:
         ok, frame = self._cap.read()
         if not ok or frame is None:
             return None
-        ok, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
-        if not ok:
-            return None
-        return base64.b64encode(buffer).decode("utf-8")
+        return _encode_frame_b64(frame, quality=quality, flip_horizontal=self._flip_horizontal)
 
     def close(self) -> None:
         self._cap.release()
@@ -101,7 +111,7 @@ def _discover_v4l_devices() -> list[str]:
     return devices
 
 
-def _try_picamera2(width: int, height: int) -> CameraSource | None:
+def _try_picamera2(width: int, height: int, flip_horizontal: bool = True) -> CameraSource | None:
     try:
         from picamera2 import Picamera2  # type: ignore[import-untyped]
     except ImportError:
@@ -120,14 +130,14 @@ def _try_picamera2(width: int, height: int) -> CameraSource | None:
             frame = picam2.capture_array()
             if frame is not None:
                 logger.info("Camera opened via picamera2 (%dx%d)", width, height)
-                return _Picamera2Source(picam2, width, height)
+                return _Picamera2Source(picam2, width, height, flip_horizontal=flip_horizontal)
         picam2.stop()
     except Exception as exc:
         logger.debug("picamera2 open failed: %s", exc)
     return None
 
 
-def _try_v4l2_path(path: str, width: int, height: int) -> CameraSource | None:
+def _try_v4l2_path(path: str, width: int, height: int, flip_horizontal: bool = True) -> CameraSource | None:
     _suppress_opencv_logs()
     cap = cv2.VideoCapture(path, cv2.CAP_V4L2)
     if not cap.isOpened():
@@ -142,7 +152,7 @@ def _try_v4l2_path(path: str, width: int, height: int) -> CameraSource | None:
         ok, frame = cap.read()
         if ok and frame is not None:
             logger.info("Camera opened via V4L2 at %s", path)
-            return _V4L2Source(cap, path)
+            return _V4L2Source(cap, path, flip_horizontal=flip_horizontal)
 
     cap.release()
     return None
@@ -154,6 +164,7 @@ def open_camera(
     height: int = 240,
     device: str | None = None,
     backend: str = "auto",
+    flip_horizontal: bool = True,
 ) -> CameraSource | None:
     """
     Open a camera on Raspberry Pi or USB webcam.
@@ -164,7 +175,7 @@ def open_camera(
       - v4l2: /dev/video* capture nodes only
     """
     if backend in ("auto", "picamera2") and sys.platform == "linux":
-        source = _try_picamera2(width, height)
+        source = _try_picamera2(width, height, flip_horizontal=flip_horizontal)
         if source is not None:
             return source
 
@@ -177,7 +188,7 @@ def open_camera(
                 candidates = [f"/dev/video{index}"]
 
         for path in candidates:
-            source = _try_v4l2_path(path, width, height)
+            source = _try_v4l2_path(path, width, height, flip_horizontal=flip_horizontal)
             if source is not None:
                 return source
 

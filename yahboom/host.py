@@ -55,6 +55,7 @@ class RaspbotHost:
         camera_index: int = 0,
         camera_device: str | None = None,
         camera_backend: str = "auto",
+        flip_horizontal: bool = True,
         enable_camera: bool = True,
     ):
         self.watchdog_ms = watchdog_ms
@@ -90,6 +91,7 @@ class RaspbotHost:
                 index=camera_index,
                 device=camera_device,
                 backend=camera_backend,
+                flip_horizontal=flip_horizontal,
             )
             if enable_camera
             else None
@@ -258,6 +260,11 @@ def main() -> None:
         default="auto",
         help="auto tries picamera2 (CSI) then V4L2 capture devices",
     )
+    parser.add_argument(
+        "--no-flip-camera",
+        action="store_true",
+        help="Disable horizontal mirror of camera feed (flipped by default)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -271,6 +278,7 @@ def main() -> None:
         camera_index=args.camera_index,
         camera_device=args.camera_device,
         camera_backend=args.camera_backend,
+        flip_horizontal=not args.no_flip_camera,
         enable_camera=not args.no_camera,
     )
 

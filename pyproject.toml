@@ -13,6 +13,7 @@ dependencies = [
     "scipy",
     "pyzmq",
     "rerun-sdk",
+    "pynput",
     # yahboom/ — Raspberry Pi robot control (simulation works without hardware)
     "gpiozero",
     "smbus2",

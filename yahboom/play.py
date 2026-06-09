@@ -6,39 +6,13 @@ Keyboard input and Rerun visualization run locally. Commands are sent to the
 robot host over ZMQ, similar to LeRobot's LeKiwi teleop flow.
 
 Start the host on the Raspberry Pi first:
-    sudo python3 -m yahboom.host
+    sudo PYTHONPATH=. python3 -m yahboom.host --camera-backend picamera2
 
 Then on your laptop:
-    python -m yahboom.play --remote-ip 192.168.1.100
+    uv run python -m yahboom.play --remote-ip 192.168.1.100
 
-Controls:
-  Movement:
-    W / ↑      - Forward
-    S / ↓      - Backward
-    A / ←      - Turn Left
-    D / →      - Turn Right
-
-  Speed:
-    + / =      - Increase speed
-    - / _      - Decrease speed
-    1-9        - Set speed level
-
-  Servos (Camera Pan/Tilt):
-    I          - Tilt up
-    K          - Tilt down
-    J          - Pan left
-    L          - Pan right
-    O          - Center servos
-
-  Peripherals:
-    B          - Beep
-    H          - Horn (long beep)
-    R          - Toggle red LED
-    E          - Toggle blue LED
-    X          - LEDs off
-
-  Control:
-    Q / Esc    - Quit
+Controls work globally (even while Rerun is focused) via pynput.
+Hold movement keys to drive; release to stop.
 """
 
 from __future__ import annotations
@@ -49,7 +23,7 @@ import sys
 import time
 
 from .client import RaspbotClient
-from .keyboard import KeyboardTeleop, TERMIOS_AVAILABLE
+from .keyboard import PYNPUT_AVAILABLE, TERMIOS_AVAILABLE, create_keyboard
 from .protocol import DEFAULT_CMD_PORT, DEFAULT_FPS, DEFAULT_OBS_PORT
 from .rerun_viz import init_rerun, log_teleop_data
 
@@ -61,10 +35,6 @@ def precise_sleep(seconds: float) -> None:
         time.sleep(seconds)
 
 
-def print_controls() -> None:
-    print(__doc__)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Remote Yahboom teleop with Rerun")
     parser.add_argument("--remote-ip", required=True, help="Robot Raspberry Pi IP address")
@@ -74,10 +44,19 @@ def main() -> None:
     parser.add_argument("--connect-timeout-s", type=float, default=5.0)
     parser.add_argument("--poll-timeout-ms", type=int, default=50)
     parser.add_argument("--no-rerun", action="store_true", help="Disable Rerun viewer")
+    parser.add_argument(
+        "--keyboard-backend",
+        choices=["pynput", "terminal"],
+        default="pynput",
+        help="pynput = global keys (works while Rerun focused); terminal = stdin only",
+    )
     args = parser.parse_args()
 
-    if not TERMIOS_AVAILABLE:
-        print("Error: termios is required for keyboard teleop (macOS/Linux).")
+    if args.keyboard_backend == "pynput" and not PYNPUT_AVAILABLE:
+        print("Error: pynput not installed. Run: uv sync")
+        sys.exit(1)
+    if args.keyboard_backend == "terminal" and not TERMIOS_AVAILABLE:
+        print("Error: termios not available on this platform.")
         sys.exit(1)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -85,7 +64,6 @@ def main() -> None:
     print("=" * 50)
     print("  Yahboom Raspbot Remote Teleop")
     print("=" * 50)
-    print_controls()
 
     client = RaspbotClient(
         remote_ip=args.remote_ip,
@@ -94,7 +72,7 @@ def main() -> None:
         connect_timeout_s=args.connect_timeout_s,
         polling_timeout_ms=args.poll_timeout_ms,
     )
-    keyboard = KeyboardTeleop()
+    keyboard = create_keyboard(backend=args.keyboard_backend)
 
     try:
         client.connect()
@@ -102,8 +80,14 @@ def main() -> None:
         if not args.no_rerun:
             init_rerun(session_name="yahboom_teleop")
 
-        print("\nReady! Focus this terminal and use WASD / arrow keys.")
-        print("Rerun viewer should open automatically (unless --no-rerun).\n")
+        if args.keyboard_backend == "pynput":
+            print("\nReady! Keys work globally — drive from Rerun or any window.")
+            print("Hold WASD / arrows to move. Press Q or Esc to quit.\n")
+        else:
+            print("\nReady! Focus this terminal to use keyboard controls.\n")
+
+        if not args.no_rerun:
+            print("Rerun viewer should open automatically (unless --no-rerun).\n")
 
         frame_idx = 0
         while True:
