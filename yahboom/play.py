@@ -72,6 +72,7 @@ def main() -> None:
     parser.add_argument("--obs-port", type=int, default=DEFAULT_OBS_PORT)
     parser.add_argument("--fps", type=int, default=DEFAULT_FPS)
     parser.add_argument("--connect-timeout-s", type=float, default=5.0)
+    parser.add_argument("--poll-timeout-ms", type=int, default=50)
     parser.add_argument("--no-rerun", action="store_true", help="Disable Rerun viewer")
     args = parser.parse_args()
 
@@ -91,6 +92,7 @@ def main() -> None:
         cmd_port=args.cmd_port,
         obs_port=args.obs_port,
         connect_timeout_s=args.connect_timeout_s,
+        polling_timeout_ms=args.poll_timeout_ms,
     )
     keyboard = KeyboardTeleop()
 
@@ -103,6 +105,7 @@ def main() -> None:
         print("\nReady! Focus this terminal and use WASD / arrow keys.")
         print("Rerun viewer should open automatically (unless --no-rerun).\n")
 
+        frame_idx = 0
         while True:
             t0 = time.perf_counter()
 
@@ -118,7 +121,9 @@ def main() -> None:
                 log_teleop_data(
                     observation=client.get_observation_dict(),
                     command=command,
+                    frame_idx=frame_idx,
                 )
+            frame_idx += 1
 
             precise_sleep(max(1.0 / args.fps - (time.perf_counter() - t0), 0.0))
 

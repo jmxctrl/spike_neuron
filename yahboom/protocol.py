@@ -22,10 +22,27 @@ class RobotCommand:
     red_led: bool = False
     blue_led: bool = False
     beep: dict[str, float] | None = None  # one-shot: {"duration": 0.1, "frequency": 440}
+    center_servos: bool = False  # one-shot: O key
+    servo_dirty: bool = False  # one-shot: I/J/K/L/O pressed
     quit: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> RobotCommand:
+        return cls(
+            movement=str(data.get("movement", "stop")),
+            speed=int(data.get("speed", 100)),
+            pan=int(data.get("pan", 90)),
+            tilt=int(data.get("tilt", 90)),
+            red_led=bool(data.get("red_led", False)),
+            blue_led=bool(data.get("blue_led", False)),
+            beep=data.get("beep"),
+            center_servos=bool(data.get("center_servos", False)),
+            servo_dirty=bool(data.get("servo_dirty", False)),
+            quit=bool(data.get("quit", False)),
+        )
 
 
 @dataclass

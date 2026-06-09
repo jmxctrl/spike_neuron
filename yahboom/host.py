@@ -9,14 +9,13 @@ to the laptop, similar to LeRobot's LeKiwi host.
 from __future__ import annotations
 
 import argparse
-import base64
 import json
 import logging
 import time
 
-import cv2
 import zmq
 
+from .camera import capture_jpeg_b64, open_camera
 from .protocol import (
     DEFAULT_CMD_PORT,
     DEFAULT_FPS,
@@ -28,6 +27,14 @@ from .protocol import (
 from .raspbot import Raspbot
 
 logger = logging.getLogger(__name__)
+
+
+def _configure_socket(socket: zmq.Socket) -> None:
+    socket.setsockopt(zmq.CONFLATE, 1)
+    socket.setsockopt(zmq.SNDHWM, 3)
+    socket.setsockopt(zmq.RCVHWM, 3)
+    socket.setsockopt(zmq.SNDBUF, 2 * 1024 * 1024)
+    socket.setsockopt(zmq.RCVBUF, 2 * 1024 * 1024)
 
 
 class RaspbotHost:
@@ -47,11 +54,11 @@ class RaspbotHost:
 
         self._context = zmq.Context()
         self._cmd_socket = self._context.socket(zmq.PULL)
-        self._cmd_socket.setsockopt(zmq.CONFLATE, 1)
+        _configure_socket(self._cmd_socket)
         self._cmd_socket.bind(f"tcp://*:{cmd_port}")
 
         self._obs_socket = self._context.socket(zmq.PUSH)
-        self._obs_socket.setsockopt(zmq.CONFLATE, 1)
+        _configure_socket(self._obs_socket)
         self._obs_socket.bind(f"tcp://*:{obs_port}")
 
         self._last_cmd_time = time.time()
@@ -61,16 +68,14 @@ class RaspbotHost:
         self._tilt = 90
         self._red_led = False
         self._blue_led = False
+        self._applied_pan = 90
+        self._applied_tilt = 90
+        self._last_distance_cm = -1.0
+        self._distance_counter = 0
 
-        self._camera = None
-        if self.enable_camera:
-            self._camera = cv2.VideoCapture(self.camera_index)
-            if self._camera.isOpened():
-                self._camera.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
-                self._camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
-            else:
-                logger.warning("Camera unavailable; continuing without video stream")
-                self._camera = None
+        self._camera = open_camera(camera_index) if enable_camera else None
+        if enable_camera and self._camera is None:
+            logger.warning("Camera unavailable; continuing without video stream")
 
     def close(self) -> None:
         if self._camera is not None:
@@ -86,23 +91,14 @@ class RaspbotHost:
             return None
         try:
             data = json.loads(msg)
-            return RobotCommand(**data)
-        except (json.JSONDecodeError, TypeError) as exc:
+            return RobotCommand.from_dict(data)
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
             logger.error("Invalid command JSON: %s", exc)
             return None
 
-    def _apply_command(self, robot: Raspbot, command: RobotCommand) -> None:
-        if command.quit:
-            return
-
-        self._speed = command.speed
-        self._pan = command.pan
-        self._tilt = command.tilt
-        self._red_led = command.red_led
-        self._blue_led = command.blue_led
-
+    def _apply_movement(self, robot: Raspbot, command: RobotCommand) -> None:
         movement = command.movement
-        speed = command.speed
+        speed = int(command.speed)
         if movement == "forward":
             robot.forward(speed)
         elif movement == "backward":
@@ -114,8 +110,42 @@ class RaspbotHost:
         else:
             robot.stop()
 
-        robot.set_pan(self._pan)
-        robot.set_tilt(self._tilt)
+    def _apply_servos(self, robot: Raspbot, command: RobotCommand) -> None:
+        pan = int(command.pan)
+        tilt = int(command.tilt)
+
+        if command.center_servos:
+            robot.center_servos()
+            self._applied_pan = 90
+            self._applied_tilt = 90
+            self._pan = 90
+            self._tilt = 90
+            return
+
+        if not command.servo_dirty and pan == self._applied_pan and tilt == self._applied_tilt:
+            return
+
+        if pan != self._applied_pan:
+            robot.set_pan(pan)
+            self._applied_pan = pan
+        if tilt != self._applied_tilt:
+            robot.set_tilt(tilt)
+            self._applied_tilt = tilt
+
+        self._pan = pan
+        self._tilt = tilt
+
+    def _apply_command(self, robot: Raspbot, command: RobotCommand) -> None:
+        if command.quit:
+            return
+
+        self._speed = int(command.speed)
+        self._red_led = command.red_led
+        self._blue_led = command.blue_led
+
+        self._apply_servos(robot, command)
+        self._apply_movement(robot, command)
+
         robot.led_red(self._red_led)
         robot.led_blue(self._blue_led)
 
@@ -125,22 +155,17 @@ class RaspbotHost:
                 frequency=int(command.beep.get("frequency", 440)),
             )
 
-    def _capture_camera_b64(self) -> str | None:
-        if self._camera is None:
-            return None
-        ok, frame = self._camera.read()
-        if not ok:
-            return None
-        ok, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-        if not ok:
-            return None
-        return base64.b64encode(buffer).decode("utf-8")
+    def _read_distance_throttled(self, robot: Raspbot, every_n: int = 10) -> float:
+        self._distance_counter += 1
+        if self._distance_counter % every_n == 0:
+            self._last_distance_cm = robot.read_distance()
+        return self._last_distance_cm
 
     def _build_observation(self, robot: Raspbot) -> RobotObservation:
         line = robot.read_line_tracker()
         ir_left, ir_right = robot.read_ir_obstacle()
         return RobotObservation(
-            distance_cm=robot.read_distance(),
+            distance_cm=self._read_distance_throttled(robot),
             line_tracker={
                 "left1": line.left1,
                 "left2": line.left2,
@@ -148,7 +173,7 @@ class RaspbotHost:
                 "right2": line.right2,
             },
             ir_obstacle={"left": ir_left, "right": ir_right},
-            camera_jpeg_b64=self._capture_camera_b64(),
+            camera_jpeg_b64=capture_jpeg_b64(self._camera),
             pan=self._pan,
             tilt=self._tilt,
             speed=self._speed,
@@ -159,9 +184,8 @@ class RaspbotHost:
     def run(self, robot: Raspbot, duration_s: float | None = None) -> None:
         logger.info("Waiting for commands on ZMQ...")
         start = time.perf_counter()
-        should_run = True
 
-        while should_run:
+        while True:
             loop_start = time.time()
             command = self._read_command()
 
@@ -184,7 +208,7 @@ class RaspbotHost:
             try:
                 self._obs_socket.send_string(json.dumps(observation.to_dict()), flags=zmq.NOBLOCK)
             except zmq.Again:
-                pass
+                logger.debug("Observation dropped (client not keeping up)")
 
             if duration_s is not None and time.perf_counter() - start >= duration_s:
                 break

@@ -41,6 +41,8 @@ class KeyboardTeleop:
         self._last_key_time = 0.0
         self._key_timeout = 0.6
         self._pending_beep: dict[str, float] | None = None
+        self._center_servos = False
+        self._servo_dirty = False
         self._lock = threading.Lock()
 
     def start(self) -> None:
@@ -55,6 +57,10 @@ class KeyboardTeleop:
         with self._lock:
             beep = self._pending_beep
             self._pending_beep = None
+            center_servos = self._center_servos
+            self._center_servos = False
+            servo_dirty = self._servo_dirty
+            self._servo_dirty = False
             return RobotCommand(
                 movement=self.movement,
                 speed=self.speed,
@@ -63,6 +69,8 @@ class KeyboardTeleop:
                 red_led=self.red_led_on,
                 blue_led=self.blue_led_on,
                 beep=beep,
+                center_servos=center_servos,
+                servo_dirty=servo_dirty,
                 quit=self.quit_requested,
             )
 
@@ -119,15 +127,21 @@ class KeyboardTeleop:
                 self.speed = int(key) * 22
             elif key_lower == "i":
                 self.tilt_angle = max(0, self.tilt_angle - self.servo_step)
+                self._servo_dirty = True
             elif key_lower == "k":
                 self.tilt_angle = min(180, self.tilt_angle + self.servo_step)
+                self._servo_dirty = True
             elif key_lower == "j":
                 self.pan_angle = min(180, self.pan_angle + self.servo_step)
+                self._servo_dirty = True
             elif key_lower == "l":
                 self.pan_angle = max(0, self.pan_angle - self.servo_step)
+                self._servo_dirty = True
             elif key_lower == "o":
                 self.pan_angle = 90
                 self.tilt_angle = 90
+                self._center_servos = True
+                self._servo_dirty = True
             elif key_lower == "b":
                 self._pending_beep = {"duration": 0.1, "frequency": 440}
             elif key_lower == "h":

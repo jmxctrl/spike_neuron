@@ -46,6 +46,7 @@ class RaspbotClient:
 
         self.last_observation = RobotObservation()
         self.last_frame: np.ndarray | None = None
+        self.last_frame_jpeg_b64: str | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -59,6 +60,8 @@ class RaspbotClient:
 
         self._obs_socket = self._context.socket(zmq.PULL)
         self._obs_socket.setsockopt(zmq.CONFLATE, 1)
+        self._obs_socket.setsockopt(zmq.RCVHWM, 3)
+        self._obs_socket.setsockopt(zmq.RCVBUF, 2 * 1024 * 1024)
         self._obs_socket.connect(f"tcp://{self.remote_ip}:{self.obs_port}")
 
         poller = zmq.Poller()
@@ -129,7 +132,8 @@ class RaspbotClient:
             return self.last_observation
 
         self.last_observation = RobotObservation.from_dict(data)
-        self.last_frame = self._decode_camera(data.get("camera_jpeg_b64"))
+        self.last_frame_jpeg_b64 = data.get("camera_jpeg_b64")
+        self.last_frame = self._decode_camera(self.last_frame_jpeg_b64)
         return self.last_observation
 
     @staticmethod
@@ -163,6 +167,8 @@ class RaspbotClient:
             "ir_left": float(obs.ir_obstacle.get("left", False)),
             "ir_right": float(obs.ir_obstacle.get("right", False)),
         }
-        if self.last_frame is not None:
+        if self.last_frame_jpeg_b64:
+            out["camera_jpeg_b64"] = self.last_frame_jpeg_b64
+        elif self.last_frame is not None:
             out["camera"] = self.last_frame
         return out
