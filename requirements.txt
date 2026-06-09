@@ -4,3 +4,6 @@ matplotlib
 opencv-python
 pyserial
 scipy
+gpiozero
+smbus2
+lgpio; sys_platform == 'linux'
