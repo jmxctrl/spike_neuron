@@ -1,29 +1,66 @@
 # Yahboom Raspbot V1 Control
 
-Python library and keyboard controller for the Yahboom Raspbot V1 robot.
+Python library and remote teleop for the Yahboom Raspbot V1 robot, with a
+LeRobot-style host/client split over ZMQ.
+
+## Architecture
+
+| Machine | Script | Role |
+|---------|--------|------|
+| Raspberry Pi (robot) | `python -m yahboom.host` | GPIO, motors, sensors, camera → streams observations |
+| Laptop (main computer) | `python -m yahboom.play --remote-ip <PI_IP>` | Keyboard control + Rerun visualization |
+
+ZMQ ports (defaults):
+
+- **5555** — commands (laptop PUSH → robot PULL)
+- **5556** — observations (robot PUSH → laptop PULL)
 
 ## Requirements
 
-- Raspberry Pi (tested on Pi 5)
-- Yahboom Raspbot V1
+### Robot (Raspberry Pi)
+
+- Raspberry Pi with Yahboom Raspbot V1
 - I2C enabled (`sudo raspi-config` → Interface Options → I2C)
 
-### System packages (for GPIO):
 ```bash
 sudo apt install python3-lgpio python3-rpi-lgpio python3-smbus
 ```
 
-## Usage
+### Laptop
 
-### Run the keyboard controller:
+- Python 3.11+
+- Network access to the Pi on ports 5555–5556
+
 ```bash
-cd ~/berrybot
-sudo python3 yahboom/play.py
+uv sync
+# or: pip install pyzmq rerun-sdk opencv-python numpy
 ```
 
-> **Note:** `sudo` is required for GPIO access. Using `uv run` won't work because the virtual environment can't access system GPIO libraries.
+On macOS, grant Terminal **Input Monitoring** permission for keyboard teleop
+(System Settings → Privacy & Security → Input Monitoring).
 
-### Controls
+## Quick start
+
+**1. On the robot (SSH into the Pi):**
+
+```bash
+cd ~/spike_neuron
+sudo uv run python -m yahboom.host
+```
+
+> `sudo` is required for GPIO access on the Pi.
+
+**2. On your laptop:**
+
+```bash
+cd ~/spike_neuron
+uv run python -m yahboom.play --remote-ip 192.168.1.100
+```
+
+Replace `192.168.1.100` with your Pi's IP address. A Rerun viewer window opens
+with the camera feed, sensor readings, and current action.
+
+## Controls (laptop keyboard)
 
 | Key | Action |
 |-----|--------|
@@ -49,58 +86,56 @@ sudo python3 yahboom/play.py
 | R | Toggle red LED |
 | E | Toggle blue LED |
 | X | Turn off LEDs |
-| **Sensors** | |
-| Space | Read ultrasonic distance |
-| T | Read line trackers |
-| P | Read IR obstacle sensors |
 | **Control** | |
 | Q / Esc | Quit |
 
-## Using the Library
+Sensor readings (distance, line trackers, IR) stream continuously to Rerun
+under `observation/*`.
+
+## Host options
+
+```bash
+sudo python -m yahboom.host --help
+
+# Common flags:
+sudo python -m yahboom.host --fps 30
+sudo python -m yahboom.host --watchdog-ms 500
+sudo python -m yahboom.host --no-camera
+sudo python -m yahboom.host --duration-s 3600
+```
+
+The host stops motors automatically if no command arrives within the watchdog
+timeout (default 500 ms).
+
+## Client options
+
+```bash
+python -m yahboom.play --remote-ip 192.168.1.100 --fps 30
+python -m yahboom.play --remote-ip 192.168.1.100 --no-rerun
+```
+
+## Using the library directly
 
 ```python
 from yahboom.raspbot import Raspbot
 
-# Create and initialize robot
 robot = Raspbot()
 robot.init()
 
-# Movement
-robot.forward(100)   # Speed 0-255
-robot.backward(100)
-robot.turn_left(100)
-robot.turn_right(100)
+robot.forward(100)
 robot.stop()
-
-# Servos
-robot.set_pan(90)    # 0-180 degrees
-robot.set_tilt(90)
-robot.center_servos()
-
-# LEDs
-robot.led_red(True)
-robot.led_blue(True)
-robot.leds_off()
-
-# Buzzer
-robot.beep(0.1, 440)  # duration, frequency
-
-# Sensors
-distance = robot.read_distance()           # cm
-line = robot.read_line_tracker()           # LineTrackerReading
-left, right = robot.read_ir_obstacle()     # (bool, bool)
-
-# Cleanup
 robot.cleanup()
 ```
 
-## Hardware Connections
+## Hardware connections
 
-### I2C (address 0x16):
+### I2C (address 0x16)
+
 - Motors (register 0x01)
 - Servos (register 0x03)
 
-### GPIO (BOARD pin numbers):
+### GPIO (BOARD pin numbers)
+
 | Component | Pin |
 |-----------|-----|
 | Buzzer | 32 |

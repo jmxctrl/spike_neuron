@@ -11,6 +11,8 @@ dependencies = [
     "opencv-python",
     "pyserial",
     "scipy",
+    "pyzmq",
+    "rerun-sdk",
     # yahboom/ — Raspberry Pi robot control (simulation works without hardware)
     "gpiozero",
     "smbus2",
