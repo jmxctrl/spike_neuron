@@ -1,74 +1,195 @@
-"""Camera helpers for the Yahboom host (Raspberry Pi / V4L2)."""
+"""Camera helpers for the Yahboom host (Raspberry Pi CSI + USB V4L2)."""
 
 from __future__ import annotations
 
+import base64
+import fcntl
+import glob
 import logging
+import os
+import struct
 import sys
+from typing import Protocol
 
 import cv2
 
 logger = logging.getLogger(__name__)
 
+V4L2_CAP_VIDEO_CAPTURE = 0x00000001
+VIDIOC_QUERYCAP = 0x80685600
 
-def open_camera(index: int = 0, width: int = 320, height: int = 240) -> cv2.VideoCapture | None:
-    """Try common backends/indices used on Raspberry Pi + USB webcams."""
-    if sys.platform == "linux":
-        candidates: list[tuple[int, int | None]] = [
-            (index, cv2.CAP_V4L2),
-            (index, None),
-            (1, cv2.CAP_V4L2),
-            (1, None),
-            (2, cv2.CAP_V4L2),
-        ]
-    else:
-        candidates = [(index, None), (1, None)]
 
-    for cam_index, backend in candidates:
+class CameraSource(Protocol):
+    def capture_jpeg_b64(self, quality: int = 75) -> str | None: ...
+    def close(self) -> None: ...
+
+
+class _Picamera2Source:
+    def __init__(self, picam2, width: int, height: int):
+        self._picam2 = picam2
+        self._width = width
+        self._height = height
+
+    def capture_jpeg_b64(self, quality: int = 75) -> str | None:
         try:
-            cap = (
-                cv2.VideoCapture(cam_index, backend)
-                if backend is not None
-                else cv2.VideoCapture(cam_index)
-            )
+            frame = self._picam2.capture_array()
         except Exception as exc:
-            logger.debug("Camera open failed for index=%s backend=%s: %s", cam_index, backend, exc)
-            continue
+            logger.debug("picamera2 capture failed: %s", exc)
+            return None
+        if frame is None:
+            return None
+        ok, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+        if not ok:
+            return None
+        return base64.b64encode(buffer).decode("utf-8")
 
-        if not cap.isOpened():
-            cap.release()
-            continue
+    def close(self) -> None:
+        try:
+            self._picam2.stop()
+        except Exception:
+            pass
 
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-        # Warm up — first reads are often black/empty on Pi.
-        warmed = False
-        for _ in range(15):
-            ok, _frame = cap.read()
-            if ok:
-                warmed = True
-                break
+class _V4L2Source:
+    def __init__(self, cap: cv2.VideoCapture, label: str):
+        self._cap = cap
+        self._label = label
 
-        if warmed:
-            logger.info("Camera opened on index=%s (backend=%s)", cam_index, backend)
-            return cap
+    def capture_jpeg_b64(self, quality: int = 75) -> str | None:
+        ok, frame = self._cap.read()
+        if not ok or frame is None:
+            return None
+        ok, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+        if not ok:
+            return None
+        return base64.b64encode(buffer).decode("utf-8")
 
-        cap.release()
+    def close(self) -> None:
+        self._cap.release()
 
-    logger.warning("No camera device found (tried indices %s)", [c[0] for c in candidates])
+
+def _suppress_opencv_logs() -> None:
+    try:
+        cv2.setLogLevel(0)  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+
+def _is_v4l_capture_device(path: str) -> bool:
+    """Return True only for nodes that advertise VIDEO_CAPTURE."""
+    try:
+        fd = os.open(path, os.O_RDWR | os.O_NONBLOCK)
+    except OSError:
+        return False
+    try:
+        # v4l2_capability: capabilities field at byte offset 84
+        buf = bytearray(104)
+        fcntl.ioctl(fd, VIDIOC_QUERYCAP, buf)
+        capabilities = struct.unpack_from("I", buf, 84)[0]
+        return bool(capabilities & V4L2_CAP_VIDEO_CAPTURE)
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+
+
+def _discover_v4l_devices() -> list[str]:
+    devices = []
+    for path in sorted(glob.glob("/dev/video*"), key=lambda p: int(p.replace("/dev/video", "") or 0)):
+        if _is_v4l_capture_device(path):
+            devices.append(path)
+    return devices
+
+
+def _try_picamera2(width: int, height: int) -> CameraSource | None:
+    try:
+        from picamera2 import Picamera2  # type: ignore[import-untyped]
+    except ImportError:
+        logger.debug("picamera2 not installed")
+        return None
+
+    try:
+        picam2 = Picamera2()
+        config = picam2.create_preview_configuration(
+            main={"format": "RGB888", "size": (width, height)}
+        )
+        picam2.configure(config)
+        picam2.start()
+        # Warm up
+        for _ in range(10):
+            frame = picam2.capture_array()
+            if frame is not None:
+                logger.info("Camera opened via picamera2 (%dx%d)", width, height)
+                return _Picamera2Source(picam2, width, height)
+        picam2.stop()
+    except Exception as exc:
+        logger.debug("picamera2 open failed: %s", exc)
     return None
 
 
-def capture_jpeg_b64(cap: cv2.VideoCapture | None, quality: int = 75) -> str | None:
-    if cap is None:
+def _try_v4l2_path(path: str, width: int, height: int) -> CameraSource | None:
+    _suppress_opencv_logs()
+    cap = cv2.VideoCapture(path, cv2.CAP_V4L2)
+    if not cap.isOpened():
+        cap.release()
         return None
-    ok, frame = cap.read()
-    if not ok or frame is None:
-        return None
-    ok, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
-    if not ok:
-        return None
-    import base64
 
-    return base64.b64encode(buffer).decode("utf-8")
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+    for _ in range(15):
+        ok, frame = cap.read()
+        if ok and frame is not None:
+            logger.info("Camera opened via V4L2 at %s", path)
+            return _V4L2Source(cap, path)
+
+    cap.release()
+    return None
+
+
+def open_camera(
+    index: int = 0,
+    width: int = 320,
+    height: int = 240,
+    device: str | None = None,
+    backend: str = "auto",
+) -> CameraSource | None:
+    """
+    Open a camera on Raspberry Pi or USB webcam.
+
+    backend:
+      - auto: picamera2 (CSI) first, then V4L2 capture devices
+      - picamera2: CSI camera only
+      - v4l2: /dev/video* capture nodes only
+    """
+    if backend in ("auto", "picamera2") and sys.platform == "linux":
+        source = _try_picamera2(width, height)
+        if source is not None:
+            return source
+
+    if backend in ("auto", "v4l2"):
+        if device:
+            candidates = [device]
+        else:
+            candidates = _discover_v4l_devices()
+            if not candidates and sys.platform == "linux":
+                candidates = [f"/dev/video{index}"]
+
+        for path in candidates:
+            source = _try_v4l2_path(path, width, height)
+            if source is not None:
+                return source
+
+    logger.warning(
+        "No camera device found. On Pi CSI cameras install picamera2: "
+        "sudo apt install -y python3-picamera2. "
+        "For USB cams check `v4l2-ctl --list-devices` and pass --camera-device."
+    )
+    return None
+
+
+def capture_jpeg_b64(source: CameraSource | None, quality: int = 75) -> str | None:
+    if source is None:
+        return None
+    return source.capture_jpeg_b64(quality=quality)

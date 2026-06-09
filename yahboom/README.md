@@ -102,6 +102,13 @@ sudo python -m yahboom.host --fps 30
 sudo python -m yahboom.host --watchdog-ms 500
 sudo python -m yahboom.host --no-camera
 sudo python -m yahboom.host --duration-s 3600
+
+# Pi CSI camera (Camera Module):
+sudo apt install -y python3-picamera2
+sudo python -m yahboom.host --camera-backend picamera2
+
+# USB camera — find device with v4l2-ctl --list-devices:
+sudo python -m yahboom.host --camera-device /dev/video0 --camera-backend v4l2
 ```
 
 The host stops motors automatically if no command arrives within the watchdog

@@ -45,12 +45,16 @@ class RaspbotHost:
         watchdog_ms: int = DEFAULT_WATCHDOG_MS,
         max_loop_hz: int = DEFAULT_FPS,
         camera_index: int = 0,
+        camera_device: str | None = None,
+        camera_backend: str = "auto",
         enable_camera: bool = True,
     ):
         self.watchdog_ms = watchdog_ms
         self.max_loop_hz = max_loop_hz
         self.enable_camera = enable_camera
         self.camera_index = camera_index
+        self.camera_device = camera_device
+        self.camera_backend = camera_backend
 
         self._context = zmq.Context()
         self._cmd_socket = self._context.socket(zmq.PULL)
@@ -73,13 +77,21 @@ class RaspbotHost:
         self._last_distance_cm = -1.0
         self._distance_counter = 0
 
-        self._camera = open_camera(camera_index) if enable_camera else None
+        self._camera = (
+            open_camera(
+                index=camera_index,
+                device=camera_device,
+                backend=camera_backend,
+            )
+            if enable_camera
+            else None
+        )
         if enable_camera and self._camera is None:
             logger.warning("Camera unavailable; continuing without video stream")
 
     def close(self) -> None:
         if self._camera is not None:
-            self._camera.release()
+            self._camera.close()
         self._obs_socket.close()
         self._cmd_socket.close()
         self._context.term()
@@ -226,6 +238,18 @@ def main() -> None:
     parser.add_argument("--duration-s", type=float, default=None, help="Stop after N seconds")
     parser.add_argument("--no-camera", action="store_true")
     parser.add_argument("--camera-index", type=int, default=0)
+    parser.add_argument(
+        "--camera-device",
+        type=str,
+        default=None,
+        help="V4L2 device path, e.g. /dev/video0 (from v4l2-ctl --list-devices)",
+    )
+    parser.add_argument(
+        "--camera-backend",
+        choices=["auto", "picamera2", "v4l2"],
+        default="auto",
+        help="auto tries picamera2 (CSI) then V4L2 capture devices",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -237,6 +261,8 @@ def main() -> None:
         watchdog_ms=args.watchdog_ms,
         max_loop_hz=args.fps,
         camera_index=args.camera_index,
+        camera_device=args.camera_device,
+        camera_backend=args.camera_backend,
         enable_camera=not args.no_camera,
     )
 
