@@ -13,7 +13,15 @@ import json
 import logging
 import time
 
-import zmq
+try:
+    import zmq
+except ModuleNotFoundError:
+    raise SystemExit(
+        "Missing pyzmq. On the Raspberry Pi host, install system packages:\n"
+        "  sudo apt install -y python3-zmq python3-picamera2 python3-opencv\n"
+        "Or run: bash yahboom/setup_robot.sh\n"
+        "Then start with: sudo PYTHONPATH=. python3 -m yahboom.host"
+    ) from None
 
 from .camera import capture_jpeg_b64, open_camera
 from .protocol import (

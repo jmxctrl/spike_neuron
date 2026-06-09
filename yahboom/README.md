@@ -21,9 +21,21 @@ ZMQ ports (defaults):
 
 - Raspberry Pi with Yahboom Raspbot V1
 - I2C enabled (`sudo raspi-config` → Interface Options → I2C)
+- Camera enabled if using video (`raspi-config` → Interface Options → Camera)
+
+The **host must use system Python + apt packages** (not `uv run`), because
+`picamera2` and GPIO libs are system-installed on the Pi:
 
 ```bash
-sudo apt install python3-lgpio python3-rpi-lgpio python3-smbus
+cd ~/spike_neuron
+bash yahboom/setup_robot.sh
+```
+
+Or install manually:
+
+```bash
+sudo apt install -y python3-zmq python3-opencv python3-picamera2 \
+  python3-lgpio python3-rpi-lgpio python3-smbus v4l-utils
 ```
 
 ### Laptop
@@ -45,10 +57,13 @@ On macOS, grant Terminal **Input Monitoring** permission for keyboard teleop
 
 ```bash
 cd ~/spike_neuron
-sudo uv run python -m yahboom.host
+bash yahboom/setup_robot.sh   # once, installs python3-zmq + picamera2 + GPIO
+sudo PYTHONPATH=. python3 -m yahboom.host --camera-backend picamera2
 ```
 
-> `sudo` is required for GPIO access on the Pi.
+> Use **system `python3`**, not `uv run` — the venv has `pyzmq` but not `picamera2`,
+> while system Python has `picamera2` but needs `python3-zmq` from apt.
+> `sudo` is required for GPIO access.
 
 **2. On your laptop:**
 
