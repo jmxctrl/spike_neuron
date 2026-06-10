@@ -20,17 +20,61 @@ if TYPE_CHECKING:
     from yahboom.camera import CameraSource
 
 
-def column_darkness(column: np.ndarray, threshold: int = 60) -> float:
-    """Fraction of pixels darker than threshold in a BGR column (0=no tape, 1=all dark)."""
-    gray = cv2.cvtColor(column, cv2.COLOR_BGR2GRAY)
-    _, mask = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY_INV)
-    return float(mask.sum() / 255 / mask.size)
+def _purple_tape_mask(column_bgr: np.ndarray) -> np.ndarray:
+    """Detect purple/violet painters tape on a light wood floor."""
+    b, g, r = cv2.split(column_bgr.astype(np.float32))
+    purple_metric = (b + r) / 2.0 - g
+    mask_color = purple_metric > 18.0
+
+    hsv = cv2.cvtColor(column_bgr, cv2.COLOR_BGR2HSV)
+    h, s, v = cv2.split(hsv)
+    mask_hsv = (h >= 105) & (h <= 175) & (s >= 20) & (v >= 25)
+    return mask_color | mask_hsv
+
+
+def column_tape_fraction(
+    column: np.ndarray,
+    threshold: int = 60,
+    tape_color: str = "auto",
+) -> float:
+    """
+    Fraction of pixels detected as lane tape in a BGR column (0=none, 1=all tape).
+
+    tape_color: auto (purple + black), purple, or dark (grayscale only).
+    """
+    if column.size == 0:
+        return 0.0
+
+    masks: list[np.ndarray] = []
+    if tape_color in {"auto", "purple"}:
+        masks.append(_purple_tape_mask(column))
+    if tape_color in {"auto", "dark"}:
+        gray = cv2.cvtColor(column, cv2.COLOR_BGR2GRAY)
+        masks.append(gray < threshold)
+
+    if not masks:
+        return 0.0
+
+    combined = masks[0]
+    for mask in masks[1:]:
+        combined = combined | mask
+    return float(combined.mean())
+
+
+def column_darkness(
+    column: np.ndarray,
+    threshold: int = 60,
+    tape_color: str = "auto",
+) -> float:
+    """Alias for column_tape_fraction (kept for older call sites)."""
+    return column_tape_fraction(column, threshold=threshold, tape_color=tape_color)
 
 
 def frame_to_column_scores(
     frame: np.ndarray,
     threshold: int = 60,
     roi_fraction: float = 0.45,
+    tape_color: str = "auto",
 ) -> tuple[float, float, float]:
     """
     Split bottom ROI into left / center / right and score tape darkness per column.
@@ -48,33 +92,62 @@ def frame_to_column_scores(
     right_col = roi[:, 2 * third :]
 
     return (
-        column_darkness(left_col, threshold),
-        column_darkness(center_col, threshold),
-        column_darkness(right_col, threshold),
+        column_tape_fraction(left_col, threshold, tape_color=tape_color),
+        column_tape_fraction(center_col, threshold, tape_color=tape_color),
+        column_tape_fraction(right_col, threshold, tape_color=tape_color),
     )
 
 
+def tape_mask_for_roi(frame_bgr: np.ndarray, roi_fraction: float = 0.45, tape_color: str = "auto", threshold: int = 60) -> np.ndarray:
+    """Binary mask of detected tape in the bottom ROI (for debug overlay)."""
+    h, w = frame_bgr.shape[:2]
+    y0 = int(h * (1.0 - roi_fraction))
+    roi = frame_bgr[y0:, :]
+    if tape_color == "purple":
+        mask = _purple_tape_mask(roi)
+    elif tape_color == "dark":
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        mask = gray < threshold
+    else:
+        mask = _purple_tape_mask(roi)
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        mask = mask | (gray < threshold)
+    full = np.zeros((h, w), dtype=np.uint8)
+    full[y0:, :] = (mask.astype(np.uint8) * 255)
+    return full
+
+
 def columns_to_lane_sensors(
-    left_dark: float,
-    center_dark: float,
-    right_dark: float,
+    left_tape: float,
+    center_tape: float,
+    right_tape: float,
 ) -> list[float]:
     """
-    Map raw column darkness to 3 lane sensors in [0, 1].
+    Map per-column tape scores to 3 lane sensors in [0, 1].
 
-    Matches light_task semantics: centered -> [0, 1, 0]; drift left -> high left
-    sensor; drift right -> high right sensor.
+    Centered between lines -> outer columns balanced -> high center.
+    Drift left -> more tape in left column -> high left sensor.
     """
-    diff = left_dark - right_dark
-    left_sensor = float(np.clip(max(0.0, diff) * 1.5, 0.0, 1.0))
-    right_sensor = float(np.clip(max(0.0, -diff) * 1.5, 0.0, 1.0))
-    center_sensor = float(np.clip(1.0 - left_sensor - right_sensor, 0.0, 1.0))
+    outer = left_tape + right_tape
+    if outer < 0.02:
+        return [0.0, 0.5, 0.0]
+
+    imbalance = (left_tape / outer) - (right_tape / outer)
+    left_sensor = float(np.clip(max(0.0, imbalance) * 2.0, 0.0, 1.0))
+    right_sensor = float(np.clip(max(0.0, -imbalance) * 2.0, 0.0, 1.0))
+    balance = 1.0 - abs(imbalance)
+    center_clear = 1.0 - min(1.0, center_tape * 2.0)
+    center_sensor = float(np.clip(balance * center_clear, 0.0, 1.0))
     return [left_sensor, center_sensor, right_sensor]
 
 
-def lane_sensors_from_frame(frame: np.ndarray, threshold: int = 60) -> list[float]:
-    l_dark, c_dark, r_dark = frame_to_column_scores(frame, threshold=threshold)
-    return columns_to_lane_sensors(l_dark, c_dark, r_dark)
+def lane_sensors_from_frame(
+    frame: np.ndarray,
+    threshold: int = 60,
+    tape_color: str = "auto",
+) -> list[float]:
+    scores = frame_to_column_scores(frame, threshold=threshold, tape_color=tape_color)
+    return columns_to_lane_sensors(*scores)
 
 
 def interpret_lane_state(sensors: list[float]) -> str:
@@ -108,11 +181,17 @@ def annotate_debug_frame(
     *,
     threshold: int = 60,
     roi_fraction: float = 0.45,
+    tape_color: str = "auto",
 ) -> np.ndarray:
-    """Draw ROI columns, sensor bars, and lane state on frame (returns RGB)."""
+    """Draw ROI columns, sensor bars, tape mask, and lane state (returns RGB)."""
     bgr = _to_bgr(frame).copy()
     h, w = bgr.shape[:2]
     y0 = int(h * (1.0 - roi_fraction))
+
+    tape_mask = tape_mask_for_roi(bgr, roi_fraction=roi_fraction, tape_color=tape_color, threshold=threshold)
+    overlay = bgr.copy()
+    overlay[tape_mask > 0] = (180, 0, 220)
+    bgr = cv2.addWeighted(bgr, 0.72, overlay, 0.28, 0)
 
     third = w // 3
     colors = [(80, 80, 255), (80, 255, 80), (255, 80, 80)]
@@ -122,7 +201,7 @@ def annotate_debug_frame(
         cv2.rectangle(bgr, (x0, y0), (x1, h), colors[i], 2)
         cv2.putText(
             bgr,
-            f"{labels[i]} {column_darkness[i]:.2f}",
+            f"{labels[i]} tape {column_darkness[i]:.2f}",
             (x0 + 4, y0 + 18),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.45,
@@ -169,8 +248,9 @@ def annotate_debug_frame(
 class FrameLaneSensor:
     """Lane sensors from an in-memory camera frame (remote / laptop)."""
 
-    def __init__(self, window_size: int = 5, threshold: int = 60):
+    def __init__(self, window_size: int = 5, threshold: int = 60, tape_color: str = "auto"):
         self._threshold = threshold
+        self._tape_color = tape_color
         self._buffers = [deque(maxlen=window_size) for _ in range(3)]
         self.last_column_darkness: tuple[float, float, float] = (0.0, 0.0, 0.0)
         self.last_raw_sensors: list[float] = [0.0, 0.5, 0.0]
@@ -180,7 +260,9 @@ class FrameLaneSensor:
             return self._filtered_or_default()
 
         bgr = _to_bgr(frame)
-        self.last_column_darkness = frame_to_column_scores(bgr, threshold=self._threshold)
+        self.last_column_darkness = frame_to_column_scores(
+            bgr, threshold=self._threshold, tape_color=self._tape_color
+        )
         self.last_raw_sensors = columns_to_lane_sensors(*self.last_column_darkness)
         for i, val in enumerate(self.last_raw_sensors):
             self._buffers[i].append(val)
@@ -200,9 +282,12 @@ class CameraLaneSensor:
         camera: CameraSource,
         window_size: int = 5,
         threshold: int = 60,
+        tape_color: str = "auto",
     ):
         self._camera = camera
-        self._frame_sensor = FrameLaneSensor(window_size=window_size, threshold=threshold)
+        self._frame_sensor = FrameLaneSensor(
+            window_size=window_size, threshold=threshold, tape_color=tape_color
+        )
 
     @property
     def last_column_darkness(self) -> tuple[float, float, float]:

@@ -28,11 +28,23 @@ logger = logging.getLogger(__name__)
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Debug lane sensors from robot camera (Rerun)")
-    parser.add_argument("--remote-ip", required=True, help="Raspberry Pi IP address")
+    from yahboom.robot_config import DEFAULT_ROBOT_IP
+
+    parser.add_argument(
+        "--remote-ip",
+        default=DEFAULT_ROBOT_IP,
+        help=f"Raspberry Pi IP address (default: {DEFAULT_ROBOT_IP})",
+    )
     parser.add_argument("--cmd-port", type=int, default=DEFAULT_CMD_PORT)
     parser.add_argument("--obs-port", type=int, default=DEFAULT_OBS_PORT)
     parser.add_argument("--hz", type=float, default=10.0)
-    parser.add_argument("--threshold", type=int, default=60)
+    parser.add_argument("--threshold", type=int, default=60, help="Dark-tape threshold (black tape only)")
+    parser.add_argument(
+        "--tape-color",
+        choices=["auto", "purple", "dark"],
+        default="auto",
+        help="Tape detection: auto=purple+black (default), purple, dark",
+    )
     parser.add_argument("--connect-timeout-s", type=float, default=5.0)
     parser.add_argument("--no-rerun", action="store_true")
     args = parser.parse_args()
@@ -64,7 +76,7 @@ def main() -> None:
     if not args.no_rerun:
         init_rerun("camera_vision_debug")
 
-    sensor = FrameLaneSensor(window_size=5, threshold=args.threshold)
+    sensor = FrameLaneSensor(window_size=5, threshold=args.threshold, tape_color=args.tape_color)
     period = 1.0 / args.hz
     step = 0
 
@@ -89,6 +101,7 @@ def main() -> None:
                     sensors,
                     sensor.last_column_darkness,
                     threshold=args.threshold,
+                    tape_color=args.tape_color,
                 )
                 log_camera_snn(
                     frame_idx=step,

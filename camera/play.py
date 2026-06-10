@@ -50,12 +50,24 @@ def precise_sleep(seconds: float) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Remote camera SNN deploy with Rerun debug")
-    parser.add_argument("--remote-ip", required=True, help="Raspberry Pi IP address")
+    from yahboom.robot_config import DEFAULT_ROBOT_IP
+
+    parser.add_argument(
+        "--remote-ip",
+        default=DEFAULT_ROBOT_IP,
+        help=f"Raspberry Pi IP address (default: {DEFAULT_ROBOT_IP})",
+    )
     parser.add_argument("--weights", type=str, default=None, help="Path to .npy weights")
     parser.add_argument("--cmd-port", type=int, default=DEFAULT_CMD_PORT)
     parser.add_argument("--obs-port", type=int, default=DEFAULT_OBS_PORT)
     parser.add_argument("--hz", type=float, default=15.0, help="Control loop rate")
-    parser.add_argument("--threshold", type=int, default=60, help="Tape darkness threshold")
+    parser.add_argument("--threshold", type=int, default=60, help="Dark-tape threshold (black tape only)")
+    parser.add_argument(
+        "--tape-color",
+        choices=["auto", "purple", "dark"],
+        default="auto",
+        help="Tape detection: auto=purple+black (default)",
+    )
     parser.add_argument("--base-speed", type=int, default=35)
     parser.add_argument("--steer-delta", type=int, default=18)
     parser.add_argument("--connect-timeout-s", type=float, default=5.0)
@@ -98,7 +110,7 @@ def main() -> None:
     if not args.no_rerun:
         init_rerun("camera_snn_deploy")
 
-    sensor = FrameLaneSensor(window_size=5, threshold=args.threshold)
+    sensor = FrameLaneSensor(window_size=5, threshold=args.threshold, tape_color=args.tape_color)
     controller = CameraSNNController(weights_path)
     driver = YahboomRemoteDriver(client, base_speed=args.base_speed, steer_delta=args.steer_delta)
 
@@ -133,6 +145,7 @@ def main() -> None:
                     sensor.last_column_darkness,
                     action=action,
                     threshold=args.threshold,
+                    tape_color=args.tape_color,
                 )
                 log_camera_snn(
                     frame_idx=step,

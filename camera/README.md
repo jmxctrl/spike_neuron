@@ -115,7 +115,9 @@ uv run python -m camera.debug_vision --remote-ip <PI_IP> --threshold 45
 | `columns/*` | Raw column darkness |
 | `debug/lane_state` | Text interpretation |
 
-Tune `--threshold` until centered → **C high**, push left → **L rises**, push right → **R rises**.
+Purple tape is detected by **color** (default `--tape-color auto`). Black tape also works via `--threshold`.
+
+Tune until centered → **C high**, push left → **L rises**, push right → **R rises**. Debug overlay highlights detected tape in **magenta**.
 
 ### 4. Mac — autonomous deploy
 
@@ -168,7 +170,8 @@ uv run python -m yahboom.play --remote-ip 192.168.1.170
 |------|---------|---------|
 | `--remote-ip` | *(required)* | Pi IP address |
 | `--weights` | latest in `trained_weights/` | SNN weights |
-| `--threshold` | `60` | Tape detection (match `debug_vision`) |
+| `--threshold` | `60` | Black-tape darkness threshold |
+| `--tape-color` | `auto` | `auto` (purple+black), `purple`, or `dark` |
 | `--base-speed` | `35` | Forward speed |
 | `--steer-delta` | `18` | Turn strength |
 | `--hz` | `15` | Control loop rate |
@@ -215,9 +218,10 @@ camera/
 |---------|-----|
 | Connection timeout | Is `yahboom.host` running on Pi? Same Wi‑Fi? |
 | Rerun doesn't open | `uv sync` on Mac; try `--no-rerun` for terminal-only |
-| All sensors ~0 | Lower `--threshold`; improve tape contrast |
+| All sensors ~0 | Use `--tape-color purple`; check magenta overlay hits tape |
+| Purple tape, wrong sensors | `git pull` — purple color detection is default now |
 | Center always low | Robot not centered; check debug overlay ROI |
-| Went off left, sensors said centered | Re-run `debug_vision`, tune threshold |
+| Went off left, sensors said centered | Purple wasn't detected (old darkness-only mode); verify magenta mask on tape |
 | Robot spins | Wrong weights; verify sensors change when you push robot |
 | `camera.deploy` error | Expected — use `camera.play` from Mac instead |
 

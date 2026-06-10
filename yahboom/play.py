@@ -88,7 +88,13 @@ def precise_sleep(seconds: float) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Remote Yahboom teleop with Rerun")
-    parser.add_argument("--remote-ip", required=True, help="Robot Raspberry Pi IP address")
+    from .robot_config import DEFAULT_ROBOT_IP
+
+    parser.add_argument(
+        "--remote-ip",
+        default=DEFAULT_ROBOT_IP,
+        help=f"Robot Raspberry Pi IP address (default: {DEFAULT_ROBOT_IP})",
+    )
     parser.add_argument("--cmd-port", type=int, default=DEFAULT_CMD_PORT)
     parser.add_argument("--obs-port", type=int, default=DEFAULT_OBS_PORT)
     parser.add_argument("--fps", type=int, default=DEFAULT_FPS)
