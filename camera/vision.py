@@ -178,15 +178,16 @@ def detect_end_line(
     frame: np.ndarray,
     *,
     bottom_fraction: float = 0.20,
-    tape_color: str = "auto",
-    threshold: int = 60,
-    min_row_coverage: float = 0.08,
-    min_width_span: float = 0.30,
+    tape_color: str = "dark",
+    threshold: int = 75,
+    min_row_coverage: float = 0.12,
+    min_width_span: float = 0.35,
 ) -> EndLineResult:
     """
-    Detect a horizontal end-of-lane tape bar in the bottom strip of the frame.
+    Detect a horizontal end-of-lane bar in the bottom strip of the frame.
 
-    Triggers when tape spans most of the image width near the bottom edge.
+    Default: fat **black** tape (grayscale darkness only, not purple lane lines).
+    Triggers when the bar spans most of the image width near the bottom edge.
     """
     if frame is None or frame.size == 0:
         return EndLineResult(False, 0.0, 0.0, 0.0)
@@ -245,23 +246,35 @@ def corridor_visible(sensors: list[float]) -> bool:
     return False
 
 
+def is_recovery_complete(sensors: list[float]) -> bool:
+    """True when good enough to hand back to full-speed SNN."""
+    left, center, right = sensors
+    if is_lane_centered(sensors):
+        return True
+    if center >= 0.38 and abs(left - right) < 0.30:
+        return True
+    if left >= 0.10 and right >= 0.10 and abs(left - right) < 0.22:
+        return True
+    return False
+
+
 def centering_steer_action(sensors: list[float]) -> int:
     """
-    Simple proportional steer to re-center between lane lines.
+    Steer while creeping forward to re-center between lane lines.
 
     Returns -1 (left), 0 (straight), or +1 (right).
     """
     left, center, right = sensors
     imbalance = left - right
-    if imbalance > 0.10:
+    if imbalance > 0.20:
         return 1
-    if imbalance < -0.10:
+    if imbalance < -0.20:
         return -1
-    if center >= 0.45:
+    if center >= 0.38 and abs(imbalance) < 0.15:
         return 0
-    if imbalance > 0.04:
+    if imbalance > 0.06:
         return 1
-    if imbalance < -0.04:
+    if imbalance < -0.06:
         return -1
     return 0
 
@@ -284,12 +297,18 @@ def annotate_debug_frame(
     tape_color: str = "auto",
     end_line: EndLineResult | None = None,
     end_line_fraction: float = 0.20,
+    end_tape_color: str = "dark",
+    end_threshold: int = 75,
 ) -> np.ndarray:
     """Draw ROI columns, sensor bars, tape mask, and lane state (returns RGB)."""
     bgr = _to_bgr(frame).copy()
     h, w = bgr.shape[:2]
     end_y0 = int(h * (1.0 - end_line_fraction))
     cv2.rectangle(bgr, (0, end_y0), (w - 1, h - 1), (0, 220, 255), 1)
+    end_mask = _tape_mask_strip(bgr[end_y0:, :], end_tape_color, end_threshold)
+    end_overlay = bgr.copy()
+    end_overlay[end_y0:, :][end_mask] = (40, 40, 40)
+    bgr = cv2.addWeighted(bgr, 0.85, end_overlay, 0.15, 0)
     if end_line is not None:
         end_color = (0, 255, 0) if end_line.detected else (0, 180, 255)
         end_text = "END LINE" if end_line.detected else "end zone"

@@ -62,12 +62,24 @@ def main() -> None:
     parser.add_argument("--cmd-port", type=int, default=DEFAULT_CMD_PORT)
     parser.add_argument("--obs-port", type=int, default=DEFAULT_OBS_PORT)
     parser.add_argument("--hz", type=float, default=15.0, help="Control loop rate")
-    parser.add_argument("--threshold", type=int, default=60, help="Dark-tape threshold (black tape only)")
+    parser.add_argument("--threshold", type=int, default=60, help="Lane tape threshold (purple side lines)")
     parser.add_argument(
         "--tape-color",
         choices=["auto", "purple", "dark"],
         default="auto",
-        help="Tape detection: auto=purple+black (default)",
+        help="Side lane lines: auto=purple+black (default)",
+    )
+    parser.add_argument(
+        "--end-threshold",
+        type=int,
+        default=75,
+        help="End bar threshold — fat black line (grayscale, default 75)",
+    )
+    parser.add_argument(
+        "--end-tape-color",
+        choices=["dark", "auto", "purple"],
+        default="dark",
+        help="End bar detection: dark=black only (default)",
     )
     parser.add_argument("--base-speed", type=int, default=52)
     parser.add_argument("--steer-delta", type=int, default=27)
@@ -75,14 +87,17 @@ def main() -> None:
     parser.add_argument("--no-rerun", action="store_true", help="Disable Rerun viewer")
     parser.add_argument("--no-drive", action="store_true", help="Debug only: do not send motor commands")
     parser.add_argument("--no-ping-pong", action="store_true", help="Disable end-line 180° turn laps")
-    parser.add_argument("--turn-speed", type=int, default=50, help="In-place turn speed")
-    parser.add_argument("--min-turn-seconds", type=float, default=1.0, help="Min spin before vision can stop turn")
-    parser.add_argument("--max-turn-seconds", type=float, default=4.0, help="Max spin duration safety cap")
+    parser.add_argument("--turn-speed", type=int, default=45, help="In-place turn speed")
+    parser.add_argument(
+        "--turn-seconds",
+        type=float,
+        default=3.0,
+        help="Spin duration for ~180° (2.0s ≈ 120° on Yahboom; use 3.0 for full 180°)",
+    )
     parser.add_argument("--end-confirm-frames", type=int, default=6, help="End-line frames before turn")
-    parser.add_argument("--recover-speed-scale", type=float, default=0.35, help="Speed fraction after turn (0.35 = 35%)")
-    parser.add_argument("--recover-center-frames", type=int, default=18, help="Centered frames required before full speed")
-    parser.add_argument("--min-recover-seconds", type=float, default=3.0, help="Min slow recovery time after turn")
-    parser.add_argument("--end-lockout-seconds", type=float, default=3.0, help="Ignore end bar after recovery")
+    parser.add_argument("--recover-speed-scale", type=float, default=0.35, help="Slow forward speed after turn")
+    parser.add_argument("--recover-center-frames", type=int, default=12, help="Good-enough frames before full speed")
+    parser.add_argument("--end-lockout-seconds", type=float, default=4.0, help="Ignore end bar after recovery")
     parser.add_argument("--end-zone-fraction", type=float, default=0.20, help="Bottom fraction for end bar")
     parser.add_argument("--iterations", type=int, default=0, help="0 = run until Ctrl+C")
     args = parser.parse_args()
@@ -131,16 +146,16 @@ def main() -> None:
         lap = LapController(
             driver,
             turn_speed=args.turn_speed,
-            min_turn_seconds=args.min_turn_seconds,
-            max_turn_seconds=args.max_turn_seconds,
+            turn_seconds=args.turn_seconds,
             end_confirm_frames=args.end_confirm_frames,
             recover_speed_scale=args.recover_speed_scale,
             recover_center_frames=args.recover_center_frames,
-            min_recover_seconds=args.min_recover_seconds,
             end_lockout_seconds=args.end_lockout_seconds,
             bottom_fraction=args.end_zone_fraction,
             tape_color=args.tape_color,
             threshold=args.threshold,
+            end_tape_color=args.end_tape_color,
+            end_threshold=args.end_threshold,
         )
 
     period = 1.0 / args.hz
@@ -167,8 +182,8 @@ def main() -> None:
                 end_line = detect_end_line(
                     frame if frame is not None else None,
                     bottom_fraction=args.end_zone_fraction,
-                    tape_color=args.tape_color,
-                    threshold=args.threshold,
+                    tape_color=args.end_tape_color,
+                    threshold=args.end_threshold,
                 )
                 speed_scale = 1.0
             else:
@@ -177,7 +192,10 @@ def main() -> None:
 
             if not args.no_drive:
                 if action is not None:
-                    driver.execute_action(action, speed_scale=speed_scale)
+                    if lap is not None and lap_result.slow_center:
+                        driver.execute_recovery(action, speed_scale=speed_scale)
+                    else:
+                        driver.execute_action(action, speed_scale=speed_scale)
             else:
                 client.send_command(RobotCommand(movement="stop"))
 
@@ -199,6 +217,8 @@ def main() -> None:
                     tape_color=args.tape_color,
                     end_line=end_line,
                     end_line_fraction=args.end_zone_fraction,
+                    end_tape_color=args.end_tape_color,
+                    end_threshold=args.end_threshold,
                 )
                 extra = {"lap_count": float(lap.lap_count if lap else 0)}
                 if end_line is not None:
