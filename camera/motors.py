@@ -8,7 +8,7 @@ from .controller import ACTION_LEFT, ACTION_RIGHT, ACTION_STRAIGHT
 
 
 class YahboomDriver:
-    def __init__(self, base_speed: int = 70, steer_delta: int = 35):
+    def __init__(self, base_speed: int = 35, steer_delta: int = 18):
         self.robot = Raspbot()
         self.base_speed = base_speed
         self.steer_delta = steer_delta

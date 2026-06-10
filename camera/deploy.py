@@ -36,8 +36,8 @@ def main() -> None:
     parser.add_argument("--camera-device", type=str, default=DEFAULT_CAMERA_DEVICE)
     parser.add_argument("--threshold", type=int, default=60, help="Tape darkness threshold")
     parser.add_argument("--hz", type=float, default=15.0, help="Control loop rate")
-    parser.add_argument("--base-speed", type=int, default=70)
-    parser.add_argument("--steer-delta", type=int, default=35)
+    parser.add_argument("--base-speed", type=int, default=35)
+    parser.add_argument("--steer-delta", type=int, default=18)
     parser.add_argument("--iterations", type=int, default=0, help="0 = run until Ctrl+C")
     args = parser.parse_args()
 

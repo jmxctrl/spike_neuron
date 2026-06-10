@@ -186,8 +186,8 @@ sudo PYTHONPATH=. python3 -m camera.deploy \
 | `--weights` | latest in `trained_weights/` | Trained SNN weights |
 | `--camera-device` | `/dev/video8` | USB webcam |
 | `--threshold` | `60` | Tape detection (match `test_vision`) |
-| `--base-speed` | `70` | Forward speed (lower = easier) |
-| `--steer-delta` | `35` | Turn strength |
+| `--base-speed` | `35` | Forward speed (lower = easier) |
+| `--steer-delta` | `18` | Turn strength |
 | `--hz` | `15` | Control loop rate |
 | `--iterations` | `0` | `0` = until Ctrl+C |
 
@@ -195,7 +195,7 @@ sudo PYTHONPATH=. python3 -m camera.deploy \
 
 ### Tuning on the real robot
 
-1. Start with **low speed**: `--base-speed 50 --steer-delta 25`
+1. Start with **low speed**: `--base-speed 25 --steer-delta 12`
 2. If it oscillates (zigzag), lower `--steer-delta` or train longer
 3. If it doesn’t turn enough, raise `--steer-delta` slightly
 4. If sensors look noisy, raise threshold or improve lighting/tape contrast
