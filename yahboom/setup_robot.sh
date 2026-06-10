@@ -17,4 +17,5 @@ sudo apt install -y \
 echo ""
 echo "Done. Run the host with:"
 echo "  cd ~/spike_neuron"
-echo "  sudo PYTHONPATH=. python3 -m yahboom.host --camera-backend picamera2"
+echo "  sudo PYTHONPATH=. python3 -m yahboom.host"
+echo "  # CSI cam: add --camera-backend picamera2"

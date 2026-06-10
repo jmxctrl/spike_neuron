@@ -23,7 +23,7 @@ except ModuleNotFoundError:
         "Then start with: sudo PYTHONPATH=. python3 -m yahboom.host"
     ) from None
 
-from .camera import capture_jpeg_b64, open_camera
+from .camera import DEFAULT_CAMERA_DEVICE, capture_jpeg_b64, open_camera
 from .protocol import (
     DEFAULT_CMD_PORT,
     DEFAULT_FPS,
@@ -53,8 +53,8 @@ class RaspbotHost:
         watchdog_ms: int = DEFAULT_WATCHDOG_MS,
         max_loop_hz: int = DEFAULT_FPS,
         camera_index: int = 0,
-        camera_device: str | None = None,
-        camera_backend: str = "auto",
+        camera_device: str | None = DEFAULT_CAMERA_DEVICE,
+        camera_backend: str = "v4l2",
         camera_flip: str = "both",
         enable_camera: bool = True,
     ):
@@ -251,14 +251,14 @@ def main() -> None:
     parser.add_argument(
         "--camera-device",
         type=str,
-        default=None,
-        help="V4L2 device path, e.g. /dev/video0 (from v4l2-ctl --list-devices)",
+        default=DEFAULT_CAMERA_DEVICE,
+        help=f"V4L2 device path (default: {DEFAULT_CAMERA_DEVICE})",
     )
     parser.add_argument(
         "--camera-backend",
         choices=["auto", "picamera2", "v4l2"],
-        default="auto",
-        help="auto tries picamera2 (CSI) then V4L2 capture devices",
+        default="v4l2",
+        help="v4l2=USB webcam (default), picamera2=CSI module, auto=try CSI then V4L2",
     )
     parser.add_argument(
         "--camera-flip",

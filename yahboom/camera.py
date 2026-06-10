@@ -15,6 +15,8 @@ import cv2
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_CAMERA_DEVICE = "/dev/video8"  # GENERAL WEBCAM on Pi 5 USB
+
 V4L2_CAP_VIDEO_CAPTURE = 0x00000001
 VIDIOC_QUERYCAP = 0x80685600
 
@@ -170,17 +172,17 @@ def open_camera(
     index: int = 0,
     width: int = 320,
     height: int = 240,
-    device: str | None = None,
-    backend: str = "auto",
+    device: str | None = DEFAULT_CAMERA_DEVICE,
+    backend: str = "v4l2",
     flip: FlipMode = "both",
 ) -> CameraSource | None:
     """
     Open a camera on Raspberry Pi or USB webcam.
 
     backend:
-      - auto: picamera2 (CSI) first, then V4L2 capture devices
+      - v4l2: V4L2 device path (default: /dev/video8 USB webcam)
+      - auto: picamera2 (CSI) first, then V4L2
       - picamera2: CSI camera only
-      - v4l2: /dev/video* capture nodes only
     """
     if backend in ("auto", "picamera2") and sys.platform == "linux":
         source = _try_picamera2(width, height, flip=flip)
@@ -192,6 +194,8 @@ def open_camera(
             candidates = [device]
         else:
             candidates = _discover_v4l_devices()
+            if DEFAULT_CAMERA_DEVICE not in candidates:
+                candidates.insert(0, DEFAULT_CAMERA_DEVICE)
             if not candidates and sys.platform == "linux":
                 candidates = [f"/dev/video{index}"]
 

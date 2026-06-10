@@ -81,13 +81,19 @@ cd ~/spike_neuron
 git pull
 bash yahboom/setup_robot.sh          # first time only
 
+sudo PYTHONPATH=. python3 -m yahboom.host
+```
+
+Default camera: **USB webcam at `/dev/video8`**. For a CSI Camera Module instead:
+
+```bash
 sudo PYTHONPATH=. python3 -m yahboom.host --camera-backend picamera2
 ```
 
 Expected log line:
 
 ```
-INFO: Camera opened via picamera2 (320x240)
+INFO: Camera opened via V4L2 at /dev/video8
 INFO: Waiting for commands on ZMQ...
 ```
 
@@ -173,12 +179,14 @@ sudo PYTHONPATH=. python3 -m yahboom.host --help
 Common flags:
 
 ```bash
-# Pi CSI camera (recommended)
+# USB webcam (default — /dev/video8)
+sudo PYTHONPATH=. python3 -m yahboom.host
+
+# Pi CSI camera module
 sudo PYTHONPATH=. python3 -m yahboom.host --camera-backend picamera2
 
-# USB webcam
-v4l2-ctl --list-devices
-sudo PYTHONPATH=. python3 -m yahboom.host --camera-device /dev/video0 --camera-backend v4l2
+# Different USB device — find with: v4l2-ctl --list-devices
+sudo PYTHONPATH=. python3 -m yahboom.host --camera-device /dev/video0
 
 # Tuning
 sudo PYTHONPATH=. python3 -m yahboom.host --fps 30 --watchdog-ms 2000

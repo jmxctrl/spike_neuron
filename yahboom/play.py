@@ -6,7 +6,7 @@ Keyboard input and Rerun visualization run locally. Commands are sent to the
 robot host over ZMQ, similar to LeRobot's LeKiwi teleop flow.
 
 Start the host on the Raspberry Pi first:
-    sudo PYTHONPATH=. python3 -m yahboom.host --camera-backend picamera2
+    sudo PYTHONPATH=. python3 -m yahboom.host
 
 Then on your laptop:
     uv run python -m yahboom.play --remote-ip 192.168.1.100
