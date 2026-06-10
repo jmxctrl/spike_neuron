@@ -4,3 +4,9 @@ matplotlib
 opencv-python
 pyserial
 scipy
+pyzmq
+rerun-sdk
+pynput
+gpiozero
+smbus2
+lgpio; sys_platform == 'linux'

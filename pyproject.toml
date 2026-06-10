@@ -1,0 +1,24 @@
+[project]
+name = "spike-neuron"
+version = "0.1.0"
+description = "Spiking neural network training and robot deployment"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "streamlit",
+    "numpy",
+    "matplotlib",
+    "opencv-python",
+    "pyserial",
+    "scipy",
+    "pyzmq",
+    "rerun-sdk",
+    "pynput",
+    # yahboom/ — Raspberry Pi robot control (simulation works without hardware)
+    "gpiozero",
+    "smbus2",
+    "lgpio; sys_platform == 'linux'",
+]
+
+[tool.uv]
+package = false

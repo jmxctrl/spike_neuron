@@ -1,0 +1,13 @@
+---
+description: Yahboom robot connection defaults for this project
+alwaysApply: true
+---
+
+# Robot (berry)
+
+- **Hostname:** berry
+- **IP:** `192.168.1.170`
+- **Config:** `yahboom/robot_config.py` → `DEFAULT_ROBOT_IP`
+
+When giving Pi/Mac commands, use `192.168.1.170` unless the user says otherwise.
+Pi runs `yahboom.host` only; Mac runs teleop, `camera.debug_vision`, and `camera.play`.
