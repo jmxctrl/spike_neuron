@@ -4,15 +4,9 @@ spike_vectorized.py implements a simple vectorized Leaky Integrate-and-Fire (LIF
 Run this script to generate randomized, noisy action potential spikes and membrane potential traces for a population of neurons.
 
 """
-import numpy as np
-import matplotlib 
 import os
-# Only use TkAgg if running directly, not when imported
-if __name__ == "__main__":
-    matplotlib.use('TkAgg')
-elif os.environ.get('MPLBACKEND') != 'Agg':
-    matplotlib.use('Agg')
-import matplotlib.pyplot as plt
+
+import numpy as np
 
 """
 Synaptic Weights: 
@@ -239,6 +233,14 @@ def run_vectorized_lif(
             spikes[t, :num_inputs] = external_spikes[:, t]
 
     if plot:
+        import matplotlib
+
+        if __name__ == "__main__":
+            matplotlib.use("TkAgg")
+        elif os.environ.get("MPLBACKEND") != "Agg":
+            matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
         print("About to show plot")
         fig, axs = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
         # Plot membrane potential of the first neuron
