@@ -24,21 +24,21 @@ class CameraSource(Protocol):
     def close(self) -> None: ...
 
 
-# none | horizontal (mirror) | vertical (upside-down mount) | both (180°)
+# none | horizontal | vertical | both (horizontal + vertical)
 FlipMode = str
 
 FLIP_MODES = ("none", "horizontal", "vertical", "both")
-_FLIP_AXIS = {"horizontal": 1, "vertical": 0, "both": -1}
 
 
-def _prepare_frame(frame, flip: FlipMode = "vertical"):
-    axis = _FLIP_AXIS.get(flip)
-    if axis is not None:
-        frame = cv2.flip(frame, axis)
+def _prepare_frame(frame, flip: FlipMode = "both"):
+    if flip in ("horizontal", "both"):
+        frame = cv2.flip(frame, 1)
+    if flip in ("vertical", "both"):
+        frame = cv2.flip(frame, 0)
     return frame
 
 
-def _encode_frame_b64(frame, quality: int = 75, flip: FlipMode = "vertical") -> str | None:
+def _encode_frame_b64(frame, quality: int = 75, flip: FlipMode = "both") -> str | None:
     frame = _prepare_frame(frame, flip=flip)
     ok, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
     if not ok:
@@ -47,7 +47,7 @@ def _encode_frame_b64(frame, quality: int = 75, flip: FlipMode = "vertical") -> 
 
 
 class _Picamera2Source:
-    def __init__(self, picam2, width: int, height: int, flip: FlipMode = "vertical"):
+    def __init__(self, picam2, width: int, height: int, flip: FlipMode = "both"):
         self._picam2 = picam2
         self._width = width
         self._height = height
@@ -71,7 +71,7 @@ class _Picamera2Source:
 
 
 class _V4L2Source:
-    def __init__(self, cap: cv2.VideoCapture, label: str, flip: FlipMode = "vertical"):
+    def __init__(self, cap: cv2.VideoCapture, label: str, flip: FlipMode = "both"):
         self._cap = cap
         self._label = label
         self._flip = flip
@@ -119,7 +119,7 @@ def _discover_v4l_devices() -> list[str]:
     return devices
 
 
-def _try_picamera2(width: int, height: int, flip: FlipMode = "vertical") -> CameraSource | None:
+def _try_picamera2(width: int, height: int, flip: FlipMode = "both") -> CameraSource | None:
     try:
         from picamera2 import Picamera2  # type: ignore[import-untyped]
     except ImportError:
@@ -145,7 +145,7 @@ def _try_picamera2(width: int, height: int, flip: FlipMode = "vertical") -> Came
     return None
 
 
-def _try_v4l2_path(path: str, width: int, height: int, flip: FlipMode = "vertical") -> CameraSource | None:
+def _try_v4l2_path(path: str, width: int, height: int, flip: FlipMode = "both") -> CameraSource | None:
     _suppress_opencv_logs()
     cap = cv2.VideoCapture(path, cv2.CAP_V4L2)
     if not cap.isOpened():
@@ -172,7 +172,7 @@ def open_camera(
     height: int = 240,
     device: str | None = None,
     backend: str = "auto",
-    flip: FlipMode = "vertical",
+    flip: FlipMode = "both",
 ) -> CameraSource | None:
     """
     Open a camera on Raspberry Pi or USB webcam.

@@ -73,8 +73,16 @@ class PynputKeyboardTeleop:
         self._pending_beep: dict[str, float] | None = None
         self._center_servos = False
         self._servo_dirty = False
+        self._pending_sensor_query: str | None = None
         self._lock = threading.Lock()
         self._listener = None
+
+    def pop_sensor_query(self) -> str | None:
+        """One-shot sensor read request: distance | line | ir."""
+        with self._lock:
+            query = self._pending_sensor_query
+            self._pending_sensor_query = None
+            return query
 
     def start(self) -> None:
         self._listener = _pynput_keyboard.Listener(
@@ -107,6 +115,11 @@ class PynputKeyboardTeleop:
             )
 
     def _on_press(self, key: Any) -> None:
+        if key == _pynput_keyboard.Key.space:
+            with self._lock:
+                self._pending_sensor_query = "distance"
+            return
+
         name = self._key_name(key)
         if name is None:
             return
@@ -178,6 +191,10 @@ class PynputKeyboardTeleop:
         elif key_lower == "x":
             self.red_led_on = False
             self.blue_led_on = False
+        elif key_lower == "t":
+            self._pending_sensor_query = "line"
+        elif key_lower == "p":
+            self._pending_sensor_query = "ir"
         elif key_lower == "q":
             self.quit_requested = True
             self.running = False
@@ -213,7 +230,14 @@ class TermiosKeyboardTeleop:
         self._pending_beep: dict[str, float] | None = None
         self._center_servos = False
         self._servo_dirty = False
+        self._pending_sensor_query: str | None = None
         self._lock = threading.Lock()
+
+    def pop_sensor_query(self) -> str | None:
+        with self._lock:
+            query = self._pending_sensor_query
+            self._pending_sensor_query = None
+            return query
 
     def start(self) -> None:
         threading.Thread(target=self._stop_on_release, daemon=True).start()
@@ -317,6 +341,12 @@ class TermiosKeyboardTeleop:
             elif key_lower == "x":
                 self.red_led_on = False
                 self.blue_led_on = False
+            elif key == " ":
+                self._pending_sensor_query = "distance"
+            elif key_lower == "t":
+                self._pending_sensor_query = "line"
+            elif key_lower == "p":
+                self._pending_sensor_query = "ir"
             elif key_lower == "q" or key == "\x1b":
                 self.quit_requested = True
                 self.running = False

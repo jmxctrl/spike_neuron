@@ -55,7 +55,7 @@ class RaspbotHost:
         camera_index: int = 0,
         camera_device: str | None = None,
         camera_backend: str = "auto",
-        camera_flip: str = "vertical",
+        camera_flip: str = "both",
         enable_camera: bool = True,
     ):
         self.watchdog_ms = watchdog_ms
@@ -263,9 +263,9 @@ def main() -> None:
     parser.add_argument(
         "--camera-flip",
         choices=["none", "horizontal", "vertical", "both"],
-        default="vertical",
-        help="Camera orientation fix: vertical=upside-down mount (default), "
-        "horizontal=mirror, both=180°, none=raw",
+        default="both",
+        help="Camera orientation: both=horizontal+mirror + vertical (default), "
+        "horizontal=mirror only, vertical=flip only, none=raw",
     )
     args = parser.parse_args()
 

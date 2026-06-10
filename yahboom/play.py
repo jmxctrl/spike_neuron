@@ -30,6 +30,57 @@ from .rerun_viz import init_rerun, log_teleop_data
 logger = logging.getLogger(__name__)
 
 
+def print_controls(keyboard_backend: str) -> None:
+    focus = (
+        "Keys work globally (Rerun or any window)."
+        if keyboard_backend == "pynput"
+        else "Focus this terminal for keyboard input."
+    )
+    print(f"""
+Controls ({focus})
+  Movement (hold key):
+    W / ↑      Forward          A / ←      Turn left
+    S / ↓      Backward         D / →      Turn right
+  Speed:
+    + / =      Increase         - / _      Decrease         1-9  Set level
+  Camera pan/tilt:
+    I          Tilt up          K          Tilt down
+    J          Pan left         L          Pan right        O    Center
+  Sensors (print to this terminal):
+    Space      Ultrasonic distance
+    T          Line trackers
+    P          IR obstacle sensors
+  Peripherals:
+    B          Beep             H          Horn
+    R          Toggle red LED   E          Toggle blue LED  X    LEDs off
+  Quit:
+    Q / Esc
+
+macOS: if keys don't work globally, grant Accessibility (and Input Monitoring)
+       to your terminal app in System Settings → Privacy & Security.
+""")
+
+
+def format_sensor_reading(query: str, obs: dict) -> str:
+    if query == "distance":
+        d = obs.get("distance_cm", -1)
+        if d is None or d < 0:
+            return "Distance: timeout/error"
+        return f"Distance: {d:.1f} cm"
+    if query == "line":
+        return (
+            "Line tracker: "
+            f"L1={bool(obs.get('line_left1'))} L2={bool(obs.get('line_left2'))} "
+            f"R1={bool(obs.get('line_right1'))} R2={bool(obs.get('line_right2'))}"
+        )
+    if query == "ir":
+        return (
+            "IR obstacle: "
+            f"Left={bool(obs.get('ir_left'))} Right={bool(obs.get('ir_right'))}"
+        )
+    return ""
+
+
 def precise_sleep(seconds: float) -> None:
     if seconds > 0:
         time.sleep(seconds)
@@ -80,14 +131,9 @@ def main() -> None:
         if not args.no_rerun:
             init_rerun(session_name="yahboom_teleop")
 
-        if args.keyboard_backend == "pynput":
-            print("\nReady! Keys work globally — drive from Rerun or any window.")
-            print("Hold WASD / arrows to move. Press Q or Esc to quit.\n")
-        else:
-            print("\nReady! Focus this terminal to use keyboard controls.\n")
-
+        print_controls(args.keyboard_backend)
         if not args.no_rerun:
-            print("Rerun viewer should open automatically (unless --no-rerun).\n")
+            print("Rerun viewer should open automatically.\n")
 
         frame_idx = 0
         while True:
@@ -100,6 +146,12 @@ def main() -> None:
 
             client.send_command(command)
             client.poll_observation()
+
+            sensor_query = keyboard.pop_sensor_query()
+            if sensor_query:
+                msg = format_sensor_reading(sensor_query, client.get_observation_dict())
+                if msg:
+                    print(msg)
 
             if not args.no_rerun:
                 log_teleop_data(
