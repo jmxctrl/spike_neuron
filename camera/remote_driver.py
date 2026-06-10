@@ -14,9 +14,10 @@ class YahboomRemoteDriver:
         self.base_speed = base_speed
         self.steer_delta = steer_delta
 
-    def execute_action(self, action: int) -> None:
-        base = self.base_speed
-        d = self.steer_delta
+    def execute_action(self, action: int, speed_scale: float = 1.0) -> None:
+        scale = max(0.1, min(1.0, speed_scale))
+        base = max(1, int(self.base_speed * scale))
+        d = max(1, int(self.steer_delta * scale))
         if action == ACTION_STRAIGHT:
             cmd = RobotCommand(left_speed=base, right_speed=base)
         elif action == ACTION_LEFT:

@@ -75,11 +75,14 @@ def main() -> None:
     parser.add_argument("--no-rerun", action="store_true", help="Disable Rerun viewer")
     parser.add_argument("--no-drive", action="store_true", help="Debug only: do not send motor commands")
     parser.add_argument("--no-ping-pong", action="store_true", help="Disable end-line 180° turn laps")
-    parser.add_argument("--turn-speed", type=int, default=68, help="In-place turn speed for 180°")
-    parser.add_argument("--turn-seconds", type=float, default=1.7, help="Duration to spin ~180°")
+    parser.add_argument("--turn-speed", type=int, default=50, help="In-place turn speed")
+    parser.add_argument("--min-turn-seconds", type=float, default=1.0, help="Min spin before vision can stop turn")
+    parser.add_argument("--max-turn-seconds", type=float, default=4.0, help="Max spin duration safety cap")
     parser.add_argument("--end-confirm-frames", type=int, default=6, help="End-line frames before turn")
-    parser.add_argument("--clear-seconds", type=float, default=4.0, help="Drive away after turn before re-arming end detect")
-    parser.add_argument("--end-lockout-seconds", type=float, default=3.0, help="Ignore end bar after clearing phase")
+    parser.add_argument("--recover-speed-scale", type=float, default=0.35, help="Speed fraction after turn (0.35 = 35%)")
+    parser.add_argument("--recover-center-frames", type=int, default=18, help="Centered frames required before full speed")
+    parser.add_argument("--min-recover-seconds", type=float, default=3.0, help="Min slow recovery time after turn")
+    parser.add_argument("--end-lockout-seconds", type=float, default=3.0, help="Ignore end bar after recovery")
     parser.add_argument("--end-zone-fraction", type=float, default=0.20, help="Bottom fraction for end bar")
     parser.add_argument("--iterations", type=int, default=0, help="0 = run until Ctrl+C")
     args = parser.parse_args()
@@ -128,9 +131,12 @@ def main() -> None:
         lap = LapController(
             driver,
             turn_speed=args.turn_speed,
-            turn_seconds=args.turn_seconds,
+            min_turn_seconds=args.min_turn_seconds,
+            max_turn_seconds=args.max_turn_seconds,
             end_confirm_frames=args.end_confirm_frames,
-            clear_seconds=args.clear_seconds,
+            recover_speed_scale=args.recover_speed_scale,
+            recover_center_frames=args.recover_center_frames,
+            min_recover_seconds=args.min_recover_seconds,
             end_lockout_seconds=args.end_lockout_seconds,
             bottom_fraction=args.end_zone_fraction,
             tape_color=args.tape_color,
@@ -149,9 +155,13 @@ def main() -> None:
             sensors = sensor.read_from_frame(frame)
             action, sensors = controller.run_inference(sensors)
             lane_state = interpret_lane_state(sensors)
+            speed_scale = 1.0
 
             if lap is not None:
-                action, status = lap.step(frame, action)
+                lap_result = lap.step(frame, action, sensors)
+                action = lap_result.action
+                status = lap_result.status
+                speed_scale = lap_result.speed_scale
                 end_line = lap.last_end_line
             elif not args.no_ping_pong:
                 end_line = detect_end_line(
@@ -160,12 +170,14 @@ def main() -> None:
                     tape_color=args.tape_color,
                     threshold=args.threshold,
                 )
+                speed_scale = 1.0
             else:
                 end_line = None
+                speed_scale = 1.0
 
             if not args.no_drive:
                 if action is not None:
-                    driver.execute_action(action)
+                    driver.execute_action(action, speed_scale=speed_scale)
             else:
                 client.send_command(RobotCommand(movement="stop"))
 

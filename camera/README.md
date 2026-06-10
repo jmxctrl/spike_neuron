@@ -66,7 +66,11 @@ Add a **horizontal purple tape bar** across the lane at each end:
 ══════════════════════════════════  ← start / other end
 ```
 
-When the end bar fills the **bottom 20%** of the camera view for a few frames, the robot spins 180°, **drives away** from the bar (SNN steering), then ignores the end zone for a few seconds before re-arming. This repeats forever (default in `camera.play`).
+When the end bar fills the **bottom 20%** of the camera view, the robot:
+
+1. **Spins** until lane lines are visible in the camera (not a fixed 180° timer)
+2. **Recovers** at ~35% speed using sensor-based centering until stable
+3. Resumes full-speed SNN cruise
 
 ```bash
 uv run python -m camera.play \
@@ -214,10 +218,13 @@ uv run python -m yahboom.play --remote-ip 192.168.1.170
 | `--no-drive` | off | Debug only — don't move motors |
 | `--no-rerun` | off | Terminal output only |
 | `--no-ping-pong` | off | Disable end-bar 180° turns |
-| `--turn-seconds` | `1.7` | Spin duration for ~180° |
-| `--turn-speed` | `68` | In-place turn speed |
-| `--clear-seconds` | `4.0` | Drive away after turn (end detect off) |
-| `--end-lockout-seconds` | `3.0` | Extra ignore time after clearing |
+| `--turn-speed` | `50` | In-place turn speed |
+| `--min-turn-seconds` | `1.0` | Min spin before vision can stop |
+| `--max-turn-seconds` | `4.0` | Max spin safety cap |
+| `--recover-speed-scale` | `0.35` | Speed after turn until re-centered |
+| `--recover-center-frames` | `18` | Centered frames before full speed |
+| `--min-recover-seconds` | `3.0` | Min recovery time after turn |
+| `--end-lockout-seconds` | `3.0` | Ignore end bar after recovery |
 | `--end-zone-fraction` | `0.20` | Bottom of frame for end bar |
 | `--base-speed` | `52` | Forward speed |
 | `--steer-delta` | `27` | Turn strength |

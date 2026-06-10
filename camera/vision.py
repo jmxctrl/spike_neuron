@@ -223,6 +223,49 @@ def interpret_lane_state(sensors: list[float]) -> str:
     return "UNCLEAR — check threshold / lighting"
 
 
+def is_lane_centered(
+    sensors: list[float],
+    *,
+    center_min: float = 0.48,
+    side_max: float = 0.38,
+) -> bool:
+    left, center, right = sensors
+    return center >= center_min and left < side_max and right < side_max
+
+
+def corridor_visible(sensors: list[float]) -> bool:
+    """True when lane lines are visible enough to stop a turnaround spin."""
+    left, center, right = sensors
+    if is_lane_centered(sensors):
+        return True
+    if left >= 0.12 and right >= 0.12:
+        return True
+    if center >= 0.42:
+        return True
+    return False
+
+
+def centering_steer_action(sensors: list[float]) -> int:
+    """
+    Simple proportional steer to re-center between lane lines.
+
+    Returns -1 (left), 0 (straight), or +1 (right).
+    """
+    left, center, right = sensors
+    imbalance = left - right
+    if imbalance > 0.10:
+        return 1
+    if imbalance < -0.10:
+        return -1
+    if center >= 0.45:
+        return 0
+    if imbalance > 0.04:
+        return 1
+    if imbalance < -0.04:
+        return -1
+    return 0
+
+
 def _to_bgr(frame: np.ndarray) -> np.ndarray:
     if frame.ndim == 3 and frame.shape[2] == 3:
         # Heuristic: client frames are RGB; OpenCV ops expect BGR.
