@@ -52,6 +52,42 @@ Debug output also shows human-readable state, e.g. `DRIFT LEFT — too close to 
 
 ---
 
+## Ping-pong laps (end bar → turn 180° → repeat)
+
+**No retrain needed.** After a 180° turn the robot faces back down the corridor — same forward-following SNN.
+
+Add a **horizontal purple tape bar** across the lane at each end:
+
+```
+══════════════════════════════════  ← end bar (perpendicular)
+        ║                  ║
+        ║    corridor      ║
+        ║                  ║
+══════════════════════════════════  ← start / other end
+```
+
+When the end bar fills the **bottom 20%** of the camera view for a few frames, the robot spins 180° and drives back. This repeats forever (default in `camera.play`).
+
+```bash
+uv run python -m camera.play \
+  --weights camera/trained_weights/<file>.npy
+```
+
+Tune turn if it under/over-rotates:
+
+```bash
+uv run python -m camera.play \
+  --weights camera/trained_weights/<file>.npy \
+  --turn-seconds 3.0 \
+  --turn-speed 50
+```
+
+Single-direction only (no turns): `--no-ping-pong`
+
+Debug overlay shows a **cyan box** at the bottom = end detection zone. Text `END LINE` appears when triggered.
+
+---
+
 ## Floor markings (30 cm apart)
 
 **Two solid parallel lines are enough.** You do **not** need a center line.
@@ -177,6 +213,10 @@ uv run python -m yahboom.play --remote-ip 192.168.1.170
 | `--hz` | `15` | Control loop rate |
 | `--no-drive` | off | Debug only — don't move motors |
 | `--no-rerun` | off | Terminal output only |
+| `--no-ping-pong` | off | Disable end-bar 180° turns |
+| `--turn-seconds` | `2.6` | Spin duration for ~180° |
+| `--turn-speed` | `45` | In-place turn speed |
+| `--end-zone-fraction` | `0.20` | Bottom of frame for end bar |
 | `--iterations` | `0` | `0` = until Ctrl+C |
 
 ---

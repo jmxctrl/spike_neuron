@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import statistics
 from collections import deque
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import cv2
@@ -150,6 +151,62 @@ def lane_sensors_from_frame(
     return columns_to_lane_sensors(*scores)
 
 
+def _tape_mask_strip(strip_bgr: np.ndarray, tape_color: str, threshold: int) -> np.ndarray:
+    masks: list[np.ndarray] = []
+    if tape_color in {"auto", "purple"}:
+        masks.append(_purple_tape_mask(strip_bgr))
+    if tape_color in {"auto", "dark"}:
+        gray = cv2.cvtColor(strip_bgr, cv2.COLOR_BGR2GRAY)
+        masks.append(gray < threshold)
+    if not masks:
+        return np.zeros(strip_bgr.shape[:2], dtype=bool)
+    combined = masks[0]
+    for mask in masks[1:]:
+        combined = combined | mask
+    return combined
+
+
+@dataclass
+class EndLineResult:
+    detected: bool
+    confidence: float
+    row_coverage: float
+    width_span: float
+
+
+def detect_end_line(
+    frame: np.ndarray,
+    *,
+    bottom_fraction: float = 0.20,
+    tape_color: str = "auto",
+    threshold: int = 60,
+    min_row_coverage: float = 0.08,
+    min_width_span: float = 0.30,
+) -> EndLineResult:
+    """
+    Detect a horizontal end-of-lane tape bar in the bottom strip of the frame.
+
+    Triggers when tape spans most of the image width near the bottom edge.
+    """
+    if frame is None or frame.size == 0:
+        return EndLineResult(False, 0.0, 0.0, 0.0)
+
+    bgr = _to_bgr(frame)
+    h, w = bgr.shape[:2]
+    if h == 0 or w == 0:
+        return EndLineResult(False, 0.0, 0.0, 0.0)
+
+    y0 = int(h * (1.0 - bottom_fraction))
+    strip = bgr[y0:, :]
+    mask = _tape_mask_strip(strip, tape_color, threshold)
+
+    row_coverage = float(mask.mean(axis=1).max()) if mask.size else 0.0
+    width_span = float(mask.any(axis=0).mean()) if mask.size else 0.0
+    confidence = float(min(1.0, (row_coverage + width_span) / 2.0))
+    detected = row_coverage >= min_row_coverage and width_span >= min_width_span
+    return EndLineResult(detected, confidence, row_coverage, width_span)
+
+
 def interpret_lane_state(sensors: list[float]) -> str:
     """Human-readable lane position from [left, center, right] sensors."""
     left, center, right = sensors
@@ -182,10 +239,28 @@ def annotate_debug_frame(
     threshold: int = 60,
     roi_fraction: float = 0.45,
     tape_color: str = "auto",
+    end_line: EndLineResult | None = None,
+    end_line_fraction: float = 0.20,
 ) -> np.ndarray:
     """Draw ROI columns, sensor bars, tape mask, and lane state (returns RGB)."""
     bgr = _to_bgr(frame).copy()
     h, w = bgr.shape[:2]
+    end_y0 = int(h * (1.0 - end_line_fraction))
+    cv2.rectangle(bgr, (0, end_y0), (w - 1, h - 1), (0, 220, 255), 1)
+    if end_line is not None:
+        end_color = (0, 255, 0) if end_line.detected else (0, 180, 255)
+        end_text = "END LINE" if end_line.detected else "end zone"
+        cv2.putText(
+            bgr,
+            f"{end_text} r={end_line.row_coverage:.2f} w={end_line.width_span:.2f}",
+            (8, max(end_y0 - 6, 56)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            end_color,
+            1,
+            cv2.LINE_AA,
+        )
+
     y0 = int(h * (1.0 - roi_fraction))
 
     tape_mask = tape_mask_for_roi(bgr, roi_fraction=roi_fraction, tape_color=tape_color, threshold=threshold)

@@ -24,10 +24,11 @@ from yahboom.client import RaspbotClient
 from yahboom.protocol import DEFAULT_CMD_PORT, DEFAULT_FPS, DEFAULT_OBS_PORT, RobotCommand
 
 from .controller import ACTION_LEFT, ACTION_RIGHT, ACTION_STRAIGHT, CameraSNNController
+from .lap_controller import LapController
 from .remote_driver import YahboomRemoteDriver
 from .rerun_viz import init_rerun, log_camera_snn
 from .train import WEIGHTS_DIR, list_weights
-from .vision import FrameLaneSensor, annotate_debug_frame, interpret_lane_state
+from .vision import FrameLaneSensor, annotate_debug_frame, detect_end_line, interpret_lane_state
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,12 @@ def main() -> None:
     parser.add_argument("--connect-timeout-s", type=float, default=5.0)
     parser.add_argument("--no-rerun", action="store_true", help="Disable Rerun viewer")
     parser.add_argument("--no-drive", action="store_true", help="Debug only: do not send motor commands")
-    parser.add_argument("--iterations", type=int, default=0, help="0 = until Ctrl+C")
+    parser.add_argument("--no-ping-pong", action="store_true", help="Disable end-line 180° turn laps")
+    parser.add_argument("--turn-speed", type=int, default=45, help="In-place turn speed for 180°")
+    parser.add_argument("--turn-seconds", type=float, default=2.6, help="Duration to spin ~180°")
+    parser.add_argument("--end-confirm-frames", type=int, default=6, help="End-line frames before turn")
+    parser.add_argument("--end-zone-fraction", type=float, default=0.20, help="Bottom fraction for end bar")
+    parser.add_argument("--iterations", type=int, default=0, help="0 = run until Ctrl+C")
     args = parser.parse_args()
 
     weights_path = args.weights or _default_weights()
@@ -91,6 +97,8 @@ def main() -> None:
     print(f"Speed:   base={args.base_speed} steer={args.steer_delta}")
     if args.no_drive:
         print("Mode:    DEBUG (motors disabled)")
+    elif not args.no_ping_pong:
+        print("Mode:    PING-PONG (turn 180° at end bar, repeat forever)")
     print("Ctrl+C to stop.\n")
 
     client = RaspbotClient(
@@ -113,9 +121,21 @@ def main() -> None:
     sensor = FrameLaneSensor(window_size=5, threshold=args.threshold, tape_color=args.tape_color)
     controller = CameraSNNController(weights_path)
     driver = YahboomRemoteDriver(client, base_speed=args.base_speed, steer_delta=args.steer_delta)
+    lap: LapController | None = None
+    if not args.no_ping_pong and not args.no_drive:
+        lap = LapController(
+            driver,
+            turn_speed=args.turn_speed,
+            turn_seconds=args.turn_seconds,
+            end_confirm_frames=args.end_confirm_frames,
+            bottom_fraction=args.end_zone_fraction,
+            tape_color=args.tape_color,
+            threshold=args.threshold,
+        )
 
     period = 1.0 / args.hz
     step = 0
+    status = "CRUISE"
 
     try:
         while True:
@@ -126,16 +146,31 @@ def main() -> None:
             action, sensors = controller.run_inference(sensors)
             lane_state = interpret_lane_state(sensors)
 
+            if lap is not None:
+                action, status = lap.step(frame, action)
+                end_line = lap.last_end_line
+            elif not args.no_ping_pong:
+                end_line = detect_end_line(
+                    frame if frame is not None else None,
+                    bottom_fraction=args.end_zone_fraction,
+                    tape_color=args.tape_color,
+                    threshold=args.threshold,
+                )
+            else:
+                end_line = None
+
             if not args.no_drive:
-                driver.execute_action(action)
+                if action is not None:
+                    driver.execute_action(action)
             else:
                 client.send_command(RobotCommand(movement="stop"))
 
             if step % 3 == 0:
+                action_name = "TURN" if action is None else ACTION_NAMES.get(action, action)
                 print(
-                    f"[{step:4d}] {lane_state:40s}  "
+                    f"[{step:4d}] {status:22s} {lane_state:32s}  "
                     f"L={sensors[0]:.2f} C={sensors[1]:.2f} R={sensors[2]:.2f}  "
-                    f"action={ACTION_NAMES.get(action, action)}"
+                    f"action={action_name}"
                 )
 
             if not args.no_rerun and frame is not None:
@@ -143,18 +178,26 @@ def main() -> None:
                     frame,
                     sensors,
                     sensor.last_column_darkness,
-                    action=action,
+                    action=action if action is not None else ACTION_STRAIGHT,
                     threshold=args.threshold,
                     tape_color=args.tape_color,
+                    end_line=end_line,
+                    end_line_fraction=args.end_zone_fraction,
                 )
+                extra = {"lap_count": float(lap.lap_count if lap else 0)}
+                if end_line is not None:
+                    extra["end_line_detected"] = float(end_line.detected)
+                    extra["end_row_coverage"] = end_line.row_coverage
+                    extra["end_width_span"] = end_line.width_span
                 log_camera_snn(
                     frame_idx=step,
                     camera_rgb=frame,
                     debug_rgb=debug_rgb,
                     sensors=sensors,
                     column_darkness=sensor.last_column_darkness,
-                    lane_state=lane_state,
-                    action=action,
+                    lane_state=f"{status} | {lane_state}",
+                    action=action if action is not None else ACTION_STRAIGHT,
+                    extra=extra,
                 )
 
             step += 1
