@@ -1,8 +1,30 @@
 # Camera corridor SNN
 
-Drive the Yahboom robot **between two parallel floor lines** using a spiking neural network and a **forward-facing USB camera** (`/dev/video8`).
+Drive the Yahboom robot **between two parallel floor lines** using a spiking neural network and a **forward-facing USB camera**.
 
 No center line is required — the camera sees the left and right tape in the lower image; the SNN steers to stay centered.
+
+---
+
+## Architecture (remote deploy)
+
+The Pi **only runs the host** (motors + camera). Your Mac runs vision, SNN inference, debugging, and Rerun.
+
+```
+┌─────────────────────────────┐         ZMQ          ┌──────────────────────────┐
+│  Mac (camera.play)          │  ── motor cmds :5555 ►│  Pi (yahboom.host)       │
+│  • lane sensors from JPEG   │  ◄─ camera JPEG :5556 │  • USB cam /dev/video8   │
+│  • SNN inference            │                       │  • differential motors   │
+│  • Rerun debug overlay      │                       │                          │
+└─────────────────────────────┘                       └──────────────────────────┘
+```
+
+| Command | Where | Purpose |
+|---------|-------|---------|
+| `yahboom.host` | **Pi** | Camera stream + motor execution |
+| `camera.debug_vision` | **Mac** | See what the car sees (no driving) |
+| `camera.play` | **Mac** | Autonomous SNN + live debug |
+| `camera.run_training` | **Mac** | Train weights (simulation) |
 
 ---
 
@@ -26,7 +48,7 @@ No center line is required — the camera sees the left and right tape in the lo
 | **center** | High → well centered between both lines |
 | **right** | High → too close to right line |
 
-Training uses a **camera simulator** (`sim.py`) that matches this logic. Deployment uses the real USB camera (`vision.py`).
+Debug output also shows human-readable state, e.g. `DRIFT LEFT — too close to left line`.
 
 ---
 
@@ -34,38 +56,125 @@ Training uses a **camera simulator** (`sim.py`) that matches this logic. Deploym
 
 **Two solid parallel lines are enough.** You do **not** need a center line.
 
-### Recommended layout
-
-```
-══════════════════════════════════════════  ← start / optional end bar
-        ║                          ║
-        ║    30 cm corridor        ║
-        ║         ↑ robot          ║
-        ║                          ║
-══════════════════════════════════════════
-```
-
 | Item | Recommendation |
 |------|----------------|
-| **Lines** | 2 parallel lines only (left boundary + right boundary) |
-| **Spacing** | **30 cm** between inner edges is fine for Yahboom (~12–15 cm wide → ~7–8 cm clearance per side) |
-| **Material** | Black electrical tape on **white/light** surface (poster board, white mat, light floor) |
-| **Width** | **2–3 cm** tape width — visible in camera, not so wide the corridor feels narrow |
-| **Length** | At least **2–3 m** for testing; longer for stable driving |
-| **Center** | Leave **empty floor** between the lines — no third line |
+| **Lines** | 2 parallel black tape lines on white/light surface |
+| **Spacing** | **30 cm** between inner edges |
+| **Width** | **2–3 cm** tape |
+| **Center** | Empty floor between lines — no third line |
 
-### Tips
+---
 
-- Matte white base works better than glossy or dark gray floors.
-- Avoid strong shadows across the track; diffuse room lighting helps.
-- Tape should be flat (no wrinkles) at least in the camera’s view ahead of the robot.
-- Optional: short perpendicular tape at the **start** so you can place the robot centered by hand.
+## Quick start
 
-### What does *not* work well
+### 1. Pi — start host (always first)
 
-- Single center line only (SNN expects left + right boundaries).
-- Same-color tape and floor (low contrast).
-- Lines much narrower than ~1 cm (hard to see at 320×240).
+```bash
+cd ~/spike_neuron
+git pull
+bash yahboom/setup_robot.sh   # first time only
+
+sudo PYTHONPATH=. python3 -m yahboom.host
+```
+
+USB webcam default: `/dev/video8`. CSI module: add `--camera-backend picamera2`.
+
+### 2. Mac — train weights (once)
+
+```bash
+cd ~/dev/spike_neuron
+uv sync
+uv run python -m camera.run_training
+```
+
+Weights saved to `camera/trained_weights/camera_rewardXXX_*.npy`.
+
+### 3. Mac — debug vision (no driving)
+
+Place the robot centered on the track. Rerun opens with **raw camera** and **debug overlay** (ROI columns + sensor bars).
+
+```bash
+uv run python -m camera.debug_vision --remote-ip <PI_IP>
+uv run python -m camera.debug_vision --remote-ip <PI_IP> --threshold 45
+```
+
+**Terminal output example:**
+
+```
+[   0] CENTERED                                  L=0.05 C=0.91 R=0.04  dark L=0.12 C=0.04 R=0.11
+[   3] DRIFT LEFT — too close to left line       L=0.62 C=0.38 R=0.00  dark L=0.45 C=0.08 R=0.10
+```
+
+**Rerun panels:**
+
+| Path | Content |
+|------|---------|
+| `camera/raw` | Live JPEG from robot |
+| `camera/debug` | ROI overlay + sensor bars + lane state |
+| `sensors/left`, `center`, `right` | Filtered lane values |
+| `columns/*` | Raw column darkness |
+| `debug/lane_state` | Text interpretation |
+
+Tune `--threshold` until centered → **C high**, push left → **L rises**, push right → **R rises**.
+
+### 4. Mac — autonomous deploy
+
+```bash
+uv run python -m camera.play \
+  --remote-ip <PI_IP> \
+  --weights camera/trained_weights/camera_reward254.5_20260610_104045.npy \
+  --threshold 60
+```
+
+**Dry run** (vision + SNN, motors off):
+
+```bash
+uv run python -m camera.play --remote-ip <PI_IP> --weights ... --no-drive
+```
+
+**Ctrl+C** stops motors. The Pi host keeps running — you can reconnect immediately.
+
+---
+
+## Commands reference
+
+### Pi
+
+```bash
+sudo PYTHONPATH=. python3 -m yahboom.host
+sudo PYTHONPATH=. python3 -m yahboom.host --camera-device /dev/video8
+```
+
+### Mac
+
+```bash
+# Train
+uv run python -m camera.run_training
+uv run python -m camera.run_training --episodes 200
+
+# Debug vision (Rerun, no motors)
+uv run python -m camera.debug_vision --remote-ip 192.168.1.170
+
+# Autonomous SNN
+uv run python -m camera.play --remote-ip 192.168.1.170 --weights camera/trained_weights/<file>.npy
+
+# Teleop (manual driving while building track)
+uv run python -m yahboom.play --remote-ip 192.168.1.170
+```
+
+### `camera.play` flags
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--remote-ip` | *(required)* | Pi IP address |
+| `--weights` | latest in `trained_weights/` | SNN weights |
+| `--threshold` | `60` | Tape detection (match `debug_vision`) |
+| `--base-speed` | `35` | Forward speed |
+| `--steer-delta` | `18` | Turn strength |
+| `--hz` | `15` | Control loop rate |
+| `--no-drive` | off | Debug only — don't move motors |
+| `--no-rerun` | off | Terminal output only |
+| `--iterations` | `0` | `0` = until Ctrl+C |
 
 ---
 
@@ -73,164 +182,30 @@ Training uses a **camera simulator** (`sim.py`) that matches this logic. Deploym
 
 ```
 camera/
-├── vision.py          # Camera → 3 lane sensors
-├── sim.py             # Training-time camera simulator
-├── train.py           # SNN training loop
-├── run_training.py    # Train on laptop
-├── controller.py      # SNN inference
-├── motors.py          # Yahboom forward + arc steering
-├── deploy.py          # Run on Pi
-├── test_vision.py     # Debug sensor values on Pi
-├── trained_weights/   # Saved .npy weights
+├── vision.py           # Frame → lane sensors + debug overlay
+├── sim.py              # Training simulator
+├── train.py            # SNN training loop
+├── run_training.py     # Train on Mac
+├── controller.py       # SNN inference
+├── remote_driver.py    # ZMQ motor commands (arc steering)
+├── play.py             # Remote autonomous deploy (Mac)
+├── debug_vision.py     # Remote vision debug (Mac)
+├── rerun_viz.py        # Rerun logging
+├── motors.py           # (legacy local Pi driver)
+├── deploy.py           # Deprecated — prints instructions
+├── trained_weights/
 └── README.md
 ```
 
 ---
 
-## Part 1 — Train (laptop)
+## Tuning on the real robot
 
-Training is **simulation only** (no robot needed). Takes a few minutes.
-
-```bash
-cd ~/spike_neuron
-uv sync
-
-# Train (default 500 episodes)
-uv run python -m camera.run_training
-
-# Faster test run
-uv run python -m camera.run_training --episodes 200
-```
-
-Weights are saved to:
-
-```
-camera/trained_weights/camera_rewardXXX_YYYYMMDD_HHMMSS.npy
-```
-
-Note the path of the best file — you’ll copy it to the Pi.
-
-**What good training looks like:** reward climbing over episodes; best reward often **> 150** (depends on episode length). A learning curve plot opens at the end.
-
----
-
-## Part 2 — Prepare the Pi
-
-Same setup as Yahboom teleop:
-
-```bash
-cd ~/spike_neuron
-git pull
-bash yahboom/setup_robot.sh   # once: python3-zmq, opencv, GPIO, etc.
-```
-
-Confirm USB camera:
-
-```bash
-v4l2-ctl --list-devices
-# GENERAL WEBCAM → /dev/video8
-```
-
----
-
-## Part 3 — Calibrate vision (Pi)
-
-Lay your tape corridor. Place the robot **centered** between the lines, camera facing along the track.
-
-```bash
-sudo PYTHONPATH=. python3 -m camera.test_vision
-```
-
-**Expected readings when centered:**
-
-```
-L ≈ 0.2–0.5   C ≈ 0.6–1.0   R ≈ 0.2–0.5
-```
-
-Push robot toward **left line** → **L** should rise.  
-Push toward **right line** → **R** should rise.
-
-If values are wrong, tune threshold:
-
-```bash
-sudo PYTHONPATH=. python3 -m camera.test_vision --threshold 45
-# or --threshold 75
-```
-
-Use the same `--threshold` in `deploy.py`.
-
----
-
-## Part 4 — Deploy SNN (Pi)
-
-Copy trained weights to the Pi (if trained on laptop):
-
-```bash
-# from laptop
-scp camera/trained_weights/camera_reward*.npy berry@192.168.1.170:~/spike_neuron/camera/trained_weights/
-```
-
-Run autonomous driving:
-
-```bash
-cd ~/spike_neuron
-sudo PYTHONPATH=. python3 -m camera.deploy \
-  --weights camera/trained_weights/camera_rewardXXX.npy \
-  --threshold 60 \
-  --base-speed 60 \
-  --steer-delta 30
-```
-
-| Flag | Default | Purpose |
-|------|---------|---------|
-| `--weights` | latest in `trained_weights/` | Trained SNN weights |
-| `--camera-device` | `/dev/video8` | USB webcam |
-| `--threshold` | `60` | Tape detection (match `test_vision`) |
-| `--base-speed` | `35` | Forward speed (lower = easier) |
-| `--steer-delta` | `18` | Turn strength |
-| `--hz` | `15` | Control loop rate |
-| `--iterations` | `0` | `0` = until Ctrl+C |
-
-**Ctrl+C** stops motors.
-
-### Tuning on the real robot
-
-1. Start with **low speed**: `--base-speed 25 --steer-delta 12`
-2. If it oscillates (zigzag), lower `--steer-delta` or train longer
-3. If it doesn’t turn enough, raise `--steer-delta` slightly
-4. If sensors look noisy, raise threshold or improve lighting/tape contrast
-5. If behavior is poor after good `test_vision`, **retrain** — sim may need more episodes
-
----
-
-## Part 5 — Full workflow checklist
-
-- [ ] Tape two parallel black lines ~**30 cm** apart on a light surface
-- [ ] `uv run python -m camera.run_training` on laptop
-- [ ] `scp` weights to Pi
-- [ ] `sudo PYTHONPATH=. python3 -m camera.test_vision` — sensors respond correctly
-- [ ] `sudo PYTHONPATH=. python3 -m camera.deploy --weights ...` — robot follows corridor
-- [ ] Tune `--threshold`, `--base-speed`, `--steer-delta` as needed
-
----
-
-## Steering semantics
-
-| SNN action | Motors |
-|------------|--------|
-| `0` | Forward |
-| `-1` | Forward + arc left |
-| `+1` | Forward + arc right |
-
-The network learns from reward to **increase center sensor** and avoid crashing past the corridor edges (simulated as `|position| > 1`).
-
----
-
-## Retraining after tape changes
-
-If you change line spacing, color, or lighting significantly, **retrain** (`run_training`) and optionally adjust `simulate_column_darkness()` in `sim.py` if your corridor width differs a lot from the default sim.
-
-For a **different physical spacing** (e.g. 20 cm vs 40 cm), the sim still uses normalized position `[-1, 1]` between lines — 30 cm is a good real-world scale; the network learns relative centering, not metric distance.
+1. Run `debug_vision` first — fix `--threshold` until sensors respond correctly
+2. Start autonomous with **low speed**: `--base-speed 25 --steer-delta 12`
+3. If it zigzags, lower `--steer-delta`
+4. If it doesn't turn enough, raise `--steer-delta` slightly
+5. If it drove off left but sensors showed centered, threshold/lighting is wrong — fix vision before retraining
 
 ---
 
@@ -238,25 +213,34 @@ For a **different physical spacing** (e.g. 20 cm vs 40 cm), the sim still uses n
 
 | Problem | Fix |
 |---------|-----|
-| `No weights in trained_weights` | Run `camera.run_training` first |
-| Camera won't open | Check `v4l2-ctl --list-devices`, use `--camera-device /dev/video8` |
-| All sensors ~0 | Lower threshold; improve tape contrast |
-| Center always low | Robot not centered; check tape visible in camera view |
-| Robot spins in place | Wrong weights or use `motors.py` arc mode (already default in `deploy`) |
-| Ignores lines | Retrain; verify `test_vision` shows L/R changing when pushed |
+| Connection timeout | Is `yahboom.host` running on Pi? Same Wi‑Fi? |
+| Rerun doesn't open | `uv sync` on Mac; try `--no-rerun` for terminal-only |
+| All sensors ~0 | Lower `--threshold`; improve tape contrast |
+| Center always low | Robot not centered; check debug overlay ROI |
+| Went off left, sensors said centered | Re-run `debug_vision`, tune threshold |
+| Robot spins | Wrong weights; verify sensors change when you push robot |
+| `camera.deploy` error | Expected — use `camera.play` from Mac instead |
 
 ---
 
-## Optional: teleop while debugging
+## Steering semantics
 
-Use Yahboom teleop to verify motors and camera while building the track:
+| SNN action | Motors |
+|------------|--------|
+| `0` | Forward (both wheels) |
+| `-1` | Arc left (slow left, fast right) |
+| `+1` | Arc right |
+
+---
+
+## Optional: teleop while building track
 
 ```bash
 # Pi
 sudo PYTHONPATH=. python3 -m yahboom.host
 
-# Laptop
+# Mac
 uv run python -m yahboom.play --remote-ip <PI_IP>
 ```
 
-Then switch to `camera.test_vision` and `camera.deploy` for autonomous runs.
+Then switch to `camera.debug_vision` and `camera.play` for autonomous runs (host stays up).

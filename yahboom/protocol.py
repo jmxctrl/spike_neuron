@@ -17,6 +17,8 @@ class RobotCommand:
 
     movement: str = "stop"  # forward | backward | turn_left | turn_right | stop
     speed: int = 100
+    left_speed: int | None = None  # differential drive (arc); overrides movement when set
+    right_speed: int | None = None
     pan: int = 90
     tilt: int = 90
     red_led: bool = False
@@ -31,9 +33,13 @@ class RobotCommand:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> RobotCommand:
+        left = data.get("left_speed")
+        right = data.get("right_speed")
         return cls(
             movement=str(data.get("movement", "stop")),
             speed=int(data.get("speed", 100)),
+            left_speed=int(left) if left is not None else None,
+            right_speed=int(right) if right is not None else None,
             pan=int(data.get("pan", 90)),
             tilt=int(data.get("tilt", 90)),
             red_led=bool(data.get("red_led", False)),

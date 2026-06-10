@@ -9,7 +9,6 @@ from neuromodulation import classify_actions
 from spike_vectorized import run_vectorized_lif
 
 from .train import NUM_NEURONS, NUM_STEPS, load_weights
-from .vision import CameraLaneSensor
 
 ACTION_STRAIGHT = 0
 ACTION_LEFT = -1
@@ -17,14 +16,16 @@ ACTION_RIGHT = 1
 
 
 class CameraSNNController:
-    def __init__(self, weights_path: str, sensor: CameraLaneSensor):
+    def __init__(self, weights_path: str):
         self.weights = load_weights(weights_path)
-        self.sensor = sensor
         self.last_sensors: list[float] = [0.0, 0.5, 0.0]
         self.last_action: int = ACTION_STRAIGHT
 
-    def run_inference(self) -> tuple[int, list[float]]:
-        self.last_sensors = self.sensor.read()
+    def run_inference(self, sensors: list[float] | None = None) -> tuple[int, list[float]]:
+        if sensors is not None:
+            self.last_sensors = sensors
+        else:
+            raise ValueError("sensors required (use FrameLaneSensor.read_from_frame on laptop)")
         input_spikes = encode_sensors_to_spikes(self.last_sensors, T=NUM_STEPS, p_max=0.2)
 
         _, _, pathway_history = run_vectorized_lif(

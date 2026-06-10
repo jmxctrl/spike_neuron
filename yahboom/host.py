@@ -119,6 +119,10 @@ class RaspbotHost:
             return None
 
     def _apply_movement(self, robot: Raspbot, command: RobotCommand) -> None:
+        if command.left_speed is not None and command.right_speed is not None:
+            robot.control_car(int(command.left_speed), int(command.right_speed))
+            return
+
         movement = command.movement
         speed = int(command.speed)
         if movement == "forward":

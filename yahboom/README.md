@@ -110,6 +110,24 @@ Replace `<PI_IP>` with the Pi address (e.g. `192.168.1.100`).
 - Rerun opens automatically with live camera + sensor plots
 - **Keys work globally** — you can drive while focused on Rerun (hold WASD to move)
 
+### 3. Laptop — camera SNN (autonomous corridor)
+
+The Pi runs the **same host** for teleop and autonomous driving. Vision + SNN run on your Mac.
+
+```bash
+# Pi (if not already running)
+sudo PYTHONPATH=. python3 -m yahboom.host
+
+# Mac — debug what the car sees (no driving)
+uv run python -m camera.debug_vision --remote-ip <PI_IP>
+
+# Mac — autonomous SNN
+uv run python -m camera.play --remote-ip <PI_IP> \
+  --weights camera/trained_weights/<file>.npy
+```
+
+Full guide: [`camera/README.md`](../camera/README.md)
+
 ---
 
 ## Keyboard controls
