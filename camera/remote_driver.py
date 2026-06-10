@@ -9,7 +9,7 @@ from .controller import ACTION_LEFT, ACTION_RIGHT, ACTION_STRAIGHT
 
 
 class YahboomRemoteDriver:
-    def __init__(self, client: RaspbotClient, base_speed: int = 35, steer_delta: int = 18):
+    def __init__(self, client: RaspbotClient, base_speed: int = 52, steer_delta: int = 27):
         self._client = client
         self.base_speed = base_speed
         self.steer_delta = steer_delta
@@ -27,10 +27,10 @@ class YahboomRemoteDriver:
             cmd = RobotCommand(movement="stop")
         self._client.send_command(cmd)
 
-    def spin_left(self, speed: int = 45) -> None:
+    def spin_left(self, speed: int = 68) -> None:
         self._client.send_command(RobotCommand(movement="turn_left", speed=speed))
 
-    def spin_right(self, speed: int = 45) -> None:
+    def spin_right(self, speed: int = 68) -> None:
         self._client.send_command(RobotCommand(movement="turn_right", speed=speed))
 
     def stop(self) -> None:

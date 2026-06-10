@@ -66,7 +66,7 @@ Add a **horizontal purple tape bar** across the lane at each end:
 ══════════════════════════════════  ← start / other end
 ```
 
-When the end bar fills the **bottom 20%** of the camera view for a few frames, the robot spins 180° and drives back. This repeats forever (default in `camera.play`).
+When the end bar fills the **bottom 20%** of the camera view for a few frames, the robot spins 180°, **drives away** from the bar (SNN steering), then ignores the end zone for a few seconds before re-arming. This repeats forever (default in `camera.play`).
 
 ```bash
 uv run python -m camera.play \
@@ -214,9 +214,13 @@ uv run python -m yahboom.play --remote-ip 192.168.1.170
 | `--no-drive` | off | Debug only — don't move motors |
 | `--no-rerun` | off | Terminal output only |
 | `--no-ping-pong` | off | Disable end-bar 180° turns |
-| `--turn-seconds` | `2.6` | Spin duration for ~180° |
-| `--turn-speed` | `45` | In-place turn speed |
+| `--turn-seconds` | `1.7` | Spin duration for ~180° |
+| `--turn-speed` | `68` | In-place turn speed |
+| `--clear-seconds` | `4.0` | Drive away after turn (end detect off) |
+| `--end-lockout-seconds` | `3.0` | Extra ignore time after clearing |
 | `--end-zone-fraction` | `0.20` | Bottom of frame for end bar |
+| `--base-speed` | `52` | Forward speed |
+| `--steer-delta` | `27` | Turn strength |
 | `--iterations` | `0` | `0` = until Ctrl+C |
 
 ---

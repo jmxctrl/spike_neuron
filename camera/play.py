@@ -69,15 +69,17 @@ def main() -> None:
         default="auto",
         help="Tape detection: auto=purple+black (default)",
     )
-    parser.add_argument("--base-speed", type=int, default=35)
-    parser.add_argument("--steer-delta", type=int, default=18)
+    parser.add_argument("--base-speed", type=int, default=52)
+    parser.add_argument("--steer-delta", type=int, default=27)
     parser.add_argument("--connect-timeout-s", type=float, default=5.0)
     parser.add_argument("--no-rerun", action="store_true", help="Disable Rerun viewer")
     parser.add_argument("--no-drive", action="store_true", help="Debug only: do not send motor commands")
     parser.add_argument("--no-ping-pong", action="store_true", help="Disable end-line 180° turn laps")
-    parser.add_argument("--turn-speed", type=int, default=45, help="In-place turn speed for 180°")
-    parser.add_argument("--turn-seconds", type=float, default=2.6, help="Duration to spin ~180°")
+    parser.add_argument("--turn-speed", type=int, default=68, help="In-place turn speed for 180°")
+    parser.add_argument("--turn-seconds", type=float, default=1.7, help="Duration to spin ~180°")
     parser.add_argument("--end-confirm-frames", type=int, default=6, help="End-line frames before turn")
+    parser.add_argument("--clear-seconds", type=float, default=4.0, help="Drive away after turn before re-arming end detect")
+    parser.add_argument("--end-lockout-seconds", type=float, default=3.0, help="Ignore end bar after clearing phase")
     parser.add_argument("--end-zone-fraction", type=float, default=0.20, help="Bottom fraction for end bar")
     parser.add_argument("--iterations", type=int, default=0, help="0 = run until Ctrl+C")
     args = parser.parse_args()
@@ -128,6 +130,8 @@ def main() -> None:
             turn_speed=args.turn_speed,
             turn_seconds=args.turn_seconds,
             end_confirm_frames=args.end_confirm_frames,
+            clear_seconds=args.clear_seconds,
+            end_lockout_seconds=args.end_lockout_seconds,
             bottom_fraction=args.end_zone_fraction,
             tape_color=args.tape_color,
             threshold=args.threshold,
