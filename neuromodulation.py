@@ -1,5 +1,61 @@
 import numpy as np 
 
+
+def _motor_pool_means(pathway_history, pool_size=None, window=10, num_inputs=3):
+    """Average recent pathway current into left / straight / right motor pools."""
+    if pathway_history.shape[0] < window:
+        recent_activity = pathway_history
+    else:
+        recent_activity = pathway_history[-window:, :]
+
+    features = recent_activity.mean(axis=0)
+    motor = features[num_inputs:]
+    n_motor = len(motor)
+    if n_motor < 3:
+        return 0.0, 0.0, 0.0
+
+    if pool_size is None:
+        base = n_motor // 3
+        rem = n_motor % 3
+        s0 = base + (1 if rem > 0 else 0)
+        s1 = base + (1 if rem > 1 else 0)
+        left_pool = motor[:s0].mean()
+        straight_pool = motor[s0 : s0 + s1].mean()
+        right_pool = motor[s0 + s1 :].mean()
+    else:
+        end = min(3 * pool_size, n_motor)
+        motor = motor[:end]
+        left_pool = motor[0:pool_size].mean()
+        straight_pool = motor[pool_size : 2 * pool_size].mean()
+        right_pool = motor[2 * pool_size : 3 * pool_size].mean()
+
+    return float(left_pool), float(straight_pool), float(right_pool)
+
+
+def compute_steer(
+    pathway_history,
+    pool_size=None,
+    window=10,
+    num_inputs=3,
+    gain: float = 12000.0,
+    deadzone: float = 0.08,
+) -> float:
+    """
+    Continuous steer in [-1, 1].
+
+    Positive = steer right (left wheel faster), negative = steer left.
+    Pool 0 tracks left-sensor pathways; pool 2 tracks right-sensor pathways.
+    """
+    left_pool, _straight_pool, right_pool = _motor_pool_means(
+        pathway_history, pool_size=pool_size, window=window, num_inputs=num_inputs
+    )
+    lateral = left_pool - right_pool
+    steer = float(np.tanh(gain * lateral))
+    if abs(steer) < deadzone:
+        return 0.0
+    return steer
+
+
 def classify_actions(pathway_history, pool_size=None, window=10, num_inputs=3):
     """
     Map neural pathway patterns to discrete actions 
@@ -12,42 +68,16 @@ def classify_actions(pathway_history, pool_size=None, window=10, num_inputs=3):
         actions: -1 (left), 0 (straight), +1 (right)
     """
 
-    # get last window timesteps 
-    if pathway_history.shape[0] < window:
-        recent_activity = pathway_history 
-    else: 
-        recent_activity = pathway_history[-window:, :] # [row 90-99, all columns]
-    
-    features = recent_activity.mean(axis=0)
-    motor = features[num_inputs:]
-    n_motor = len(motor)
-    if n_motor < 3:
-        return 0
-
-    if pool_size is None:
-        base = n_motor // 3
-        rem = n_motor % 3
-        s0 = base + (1 if rem > 0 else 0)
-        s1 = base + (1 if rem > 1 else 0)
-        left_pool_activity = motor[:s0].mean()
-        straight_pool_activity = motor[s0 : s0 + s1].mean()
-        right_pool_activity = motor[s0 + s1 :].mean()
-    else:
-        end = min(3 * pool_size, n_motor)
-        motor = motor[:end]
-        left_pool_activity = motor[0:pool_size].mean()
-        straight_pool_activity = motor[pool_size : 2 * pool_size].mean()
-        right_pool_activity = motor[2 * pool_size : 3 * pool_size].mean()
-
-    # Pool 0/2 track left/right sensor pathways; steer away from the hot side.
-    if (
-        straight_pool_activity > left_pool_activity
-        and straight_pool_activity > right_pool_activity
-    ):
-        return 0
-    if left_pool_activity > right_pool_activity:
+    steer = compute_steer(
+        pathway_history,
+        pool_size=pool_size,
+        window=window,
+        num_inputs=num_inputs,
+        deadzone=0.15,
+    )
+    if steer > 0.15:
         return 1
-    if right_pool_activity > left_pool_activity:
+    if steer < -0.15:
         return -1
     return 0
 

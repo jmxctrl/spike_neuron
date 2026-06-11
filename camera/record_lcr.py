@@ -44,10 +44,12 @@ def main() -> None:
     parser.add_argument("--threshold", type=int, default=60)
     parser.add_argument("--tape-color", choices=["auto", "purple", "dark"], default="auto")
     parser.add_argument("--weights", type=str, default=None, help="Optional: run SNN and log actions")
-    parser.add_argument("--action-window", type=int, default=10)
-    parser.add_argument("--p-max", type=float, default=0.2)
-    parser.add_argument("--lif-tau", type=float, default=20.0)
-    parser.add_argument("--lif-threshold", type=float, default=1.0)
+    parser.add_argument("--action-window", type=int, default=3)
+    parser.add_argument("--p-max", type=float, default=0.35)
+    parser.add_argument("--lif-tau", type=float, default=10.0)
+    parser.add_argument("--lif-threshold", type=float, default=0.8)
+    parser.add_argument("--steer-gain", type=float, default=12000.0)
+    parser.add_argument("--steer-deadzone", type=float, default=0.08)
     parser.add_argument("--base-speed", type=int, default=52)
     parser.add_argument("--steer-delta", type=int, default=27)
     parser.add_argument(
@@ -97,6 +99,8 @@ def main() -> None:
                 action_window=args.action_window,
                 lif_tau=args.lif_tau,
                 lif_threshold=args.lif_threshold,
+                steer_gain=args.steer_gain,
+                steer_deadzone=args.steer_deadzone,
             ),
         )
         driver = YahboomRemoteDriver(client, base_speed=args.base_speed, steer_delta=args.steer_delta)
@@ -152,9 +156,9 @@ def main() -> None:
                 action = ""
 
                 if controller is not None and driver is not None:
-                    action_int, sensors = controller.run_inference(sensors)
-                    driver.execute_action(action_int)
-                    action = str(action_int)
+                    steer, sensors = controller.run_inference(sensors)
+                    driver.execute_steer(steer)
+                    action = f"{steer:.3f}"
                 else:
                     client.send_command(RobotCommand(movement="stop"))
 

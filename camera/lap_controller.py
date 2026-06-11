@@ -11,7 +11,7 @@ import numpy as np
 from .remote_driver import YahboomRemoteDriver
 from .vision import (
     EndLineResult,
-    centering_steer_action,
+    centering_steer_amount,
     detect_end_line,
     is_facing_corridor,
     is_recovery_complete,
@@ -27,7 +27,7 @@ class LapPhase(str, Enum):
 
 @dataclass
 class LapStepResult:
-    action: int | None
+    action: float | None
     status: str
     speed_scale: float = 1.0
     slow_center: bool = False
@@ -106,7 +106,7 @@ class LapController:
     def step(
         self,
         frame: np.ndarray | None,
-        snn_action: int,
+        snn_action: float,
         sensors: list[float],
     ) -> LapStepResult:
         now = time.perf_counter()
@@ -152,7 +152,7 @@ class LapController:
             self.lap_count += 1
             self.phase = LapPhase.SLOW_CENTER
             self._center_streak = 0
-            steer = centering_steer_action(sensors)
+            steer = centering_steer_amount(sensors)
             return LapStepResult(
                 steer,
                 f"SLOW CENTER — lap {self.lap_count}",
@@ -161,7 +161,7 @@ class LapController:
             )
 
         if self.phase == LapPhase.SLOW_CENTER:
-            steer = centering_steer_action(sensors)
+            steer = centering_steer_amount(sensors)
             if is_recovery_complete(sensors):
                 self._center_streak += 1
             else:

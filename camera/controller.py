@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from light_task import encode_sensors_to_spikes
-from neuromodulation import classify_actions
+from neuromodulation import compute_steer
 from spike_vectorized import run_vectorized_lif
 
 from .train import NUM_NEURONS, NUM_STEPS, load_weights
@@ -26,6 +26,8 @@ class InferenceConfig:
     action_window: int = 3
     lif_tau: float = 10.0
     lif_threshold: float = 0.8
+    steer_gain: float = 12000.0
+    steer_deadzone: float = 0.08
 
 
 class CameraSNNController:
@@ -33,9 +35,9 @@ class CameraSNNController:
         self.weights = load_weights(weights_path)
         self.config = config or InferenceConfig()
         self.last_sensors: list[float] = [0.0, 0.5, 0.0]
-        self.last_action: int = ACTION_STRAIGHT
+        self.last_steer: float = 0.0
 
-    def run_inference(self, sensors: list[float] | None = None) -> tuple[int, list[float]]:
+    def run_inference(self, sensors: list[float] | None = None) -> tuple[float, list[float]]:
         if sensors is not None:
             self.last_sensors = sensors
         else:
@@ -54,5 +56,10 @@ class CameraSNNController:
             plot=False,
         )
 
-        self.last_action = int(classify_actions(pathway_history, window=cfg.action_window))
-        return self.last_action, self.last_sensors
+        self.last_steer = compute_steer(
+            pathway_history,
+            window=cfg.action_window,
+            gain=cfg.steer_gain,
+            deadzone=cfg.steer_deadzone,
+        )
+        return self.last_steer, self.last_sensors

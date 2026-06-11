@@ -270,6 +270,15 @@ def is_recovery_complete(sensors: list[float]) -> bool:
     return False
 
 
+def centering_steer_amount(sensors: list[float]) -> float:
+    """Continuous steer in [-1, 1] from lane imbalance."""
+    left, _, right = sensors
+    imbalance = left - right
+    if abs(imbalance) < 0.06:
+        return 0.0
+    return float(np.clip(imbalance * 2.0, -1.0, 1.0))
+
+
 def centering_steer_action(sensors: list[float]) -> int:
     """
     Steer while creeping forward to re-center between lane lines.
@@ -376,10 +385,19 @@ def annotate_debug_frame(
     cv2.putText(bgr, state, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
     if action is not None:
-        action_names = {-1: "STEER LEFT", 0: "FORWARD", 1: "STEER RIGHT"}
+        if isinstance(action, (int, float)):
+            a = float(action)
+            if abs(a) < 0.08:
+                action_text = "FORWARD"
+            elif a > 0:
+                action_text = f"STEER RIGHT {a:+.2f}"
+            else:
+                action_text = f"STEER LEFT {a:+.2f}"
+        else:
+            action_text = str(action)
         cv2.putText(
             bgr,
-            action_names.get(action, str(action)),
+            action_text,
             (8, 42),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,

@@ -8,7 +8,7 @@ from datetime import datetime
 import numpy as np
 
 from light_task import CarState, encode_sensors_to_spikes
-from neuromodulation import apply_dopamine, classify_actions, compute_stdp_eligibility, reward_calculator
+from neuromodulation import apply_dopamine, compute_steer, compute_stdp_eligibility, reward_calculator
 from spike_vectorized import create_weight_matrix, run_vectorized_lif
 
 from .lcr_data import RecordingBank
@@ -17,6 +17,8 @@ from .sim import get_training_sensors
 NUM_NEURONS = 100
 NUM_STEPS = 10
 P_MAX = 0.35
+STEER_GAIN = 12000.0
+STEER_DEADZONE = 0.05
 WEIGHTS_DIR = os.path.join(os.path.dirname(__file__), "trained_weights")
 DEFAULT_RECORDINGS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "recordings")
 
@@ -72,7 +74,7 @@ def run_episode(
         start_position = float(np.random.uniform(-0.5, 0.5))
 
     car = CarState(position=start_position)
-    prev_action = 0
+    prev_action = 0.0
     total_reward = 0.0
     spike_history = []
     reward_history = []
@@ -91,10 +93,15 @@ def run_episode(
         )
 
         eligibility_history.append(compute_stdp_eligibility(spikes))
-        action = classify_actions(pathway_history)
+        action = compute_steer(
+            pathway_history,
+            window=3,
+            gain=STEER_GAIN,
+            deadzone=STEER_DEADZONE,
+        )
 
         if np.random.random() < explore_prob:
-            action = int(np.random.choice([-1, 0, 1]))
+            action = float(np.random.uniform(-1.0, 1.0))
 
         car.update(action)
         reward = reward_calculator(

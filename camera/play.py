@@ -32,7 +32,10 @@ from .vision import FrameLaneSensor, annotate_debug_frame, detect_end_line, inte
 
 logger = logging.getLogger(__name__)
 
-ACTION_NAMES = {ACTION_LEFT: "LEFT", ACTION_STRAIGHT: "FWD", ACTION_RIGHT: "RIGHT"}
+def _steer_label(steer: float) -> str:
+    if abs(steer) < 0.08:
+        return "FWD"
+    return f"{'RIGHT' if steer > 0 else 'LEFT'} {steer:+.2f}"
 
 
 def _default_weights() -> str:
@@ -91,6 +94,18 @@ def main() -> None:
         type=float,
         default=0.8,
         help="LIF spike threshold (lower = easier firing)",
+    )
+    parser.add_argument(
+        "--steer-gain",
+        type=float,
+        default=12000.0,
+        help="Scale lateral pool difference into continuous steer",
+    )
+    parser.add_argument(
+        "--steer-deadzone",
+        type=float,
+        default=0.08,
+        help="Steer magnitudes below this become 0 (straight)",
     )
     parser.add_argument("--threshold", type=int, default=60, help="Lane tape threshold (purple side lines)")
     parser.add_argument(
@@ -166,7 +181,8 @@ def main() -> None:
     print(
         f"SNN:     sensor_window={args.sensor_window} hz={args.hz} "
         f"action_window={args.action_window} p_max={args.p_max} "
-        f"lif_tau={args.lif_tau} lif_threshold={args.lif_threshold}"
+        f"lif_tau={args.lif_tau} lif_threshold={args.lif_threshold} "
+        f"steer_gain={args.steer_gain} steer_deadzone={args.steer_deadzone}"
     )
     if args.no_drive:
         print("Mode:    DEBUG (motors disabled)")
@@ -201,6 +217,8 @@ def main() -> None:
         action_window=args.action_window,
         lif_tau=args.lif_tau,
         lif_threshold=args.lif_threshold,
+        steer_gain=args.steer_gain,
+        steer_deadzone=args.steer_deadzone,
     )
     controller = CameraSNNController(weights_path, config=inference_config)
     driver = YahboomRemoteDriver(client, base_speed=args.base_speed, steer_delta=args.steer_delta)
@@ -234,13 +252,13 @@ def main() -> None:
             client.poll_observation()
             frame = client.last_frame
             sensors = sensor.read_from_frame(frame)
-            action, sensors = controller.run_inference(sensors)
+            steer, sensors = controller.run_inference(sensors)
             lane_state = interpret_lane_state(sensors)
             speed_scale = 1.0
 
             if lap is not None:
-                lap_result = lap.step(frame, action, sensors)
-                action = lap_result.action
+                lap_result = lap.step(frame, steer, sensors)
+                steer = lap_result.action
                 status = lap_result.status
                 speed_scale = lap_result.speed_scale
                 end_line = lap.last_end_line
@@ -257,20 +275,20 @@ def main() -> None:
                 speed_scale = 1.0
 
             if not args.no_drive:
-                if action is not None:
+                if steer is not None:
                     if lap is not None and lap_result.slow_center:
-                        driver.execute_recovery(action, speed_scale=speed_scale)
+                        driver.execute_recovery(steer, speed_scale=speed_scale)
                     else:
-                        driver.execute_action(action, speed_scale=speed_scale)
+                        driver.execute_steer(steer, speed_scale=speed_scale)
             else:
                 client.send_command(RobotCommand(movement="stop"))
 
             if step % 3 == 0:
-                action_name = "TURN" if action is None else ACTION_NAMES.get(action, action)
+                steer_name = "TURN" if steer is None else _steer_label(float(steer))
                 print(
                     f"[{step:4d}] {status:22s} {lane_state:32s}  "
                     f"L={sensors[0]:.2f} C={sensors[1]:.2f} R={sensors[2]:.2f}  "
-                    f"action={action_name}"
+                    f"steer={steer_name}"
                 )
 
             if not args.no_rerun and frame is not None:
@@ -278,7 +296,7 @@ def main() -> None:
                     frame,
                     sensors,
                     sensor.last_column_darkness,
-                    action=action if action is not None else ACTION_STRAIGHT,
+                    action=steer if steer is not None else ACTION_STRAIGHT,
                     threshold=args.threshold,
                     tape_color=args.tape_color,
                     end_line=end_line,
@@ -298,7 +316,7 @@ def main() -> None:
                     sensors=sensors,
                     column_darkness=sensor.last_column_darkness,
                     lane_state=f"{status} | {lane_state}",
-                    action=action if action is not None else ACTION_STRAIGHT,
+                    action=steer if steer is not None else ACTION_STRAIGHT,
                     extra=extra,
                 )
 
