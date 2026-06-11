@@ -8,14 +8,19 @@ from datetime import datetime
 import numpy as np
 
 from light_task import CarState, encode_sensors_to_spikes
-from neuromodulation import apply_dopamine, classify_actions, compute_stdp_eligibility, reward_calculator
+from neuromodulation import apply_dopamine, compute_steer, compute_stdp_eligibility, reward_calculator
 from spike_vectorized import create_weight_matrix, run_vectorized_lif
 
-from .sim import get_camera_sensor_values
+from .lcr_data import RecordingBank
+from .sim import get_training_sensors
 
 NUM_NEURONS = 100
 NUM_STEPS = 10
+P_MAX = 0.35
+STEER_GAIN = 12000.0
+STEER_DEADZONE = 0.05
 WEIGHTS_DIR = os.path.join(os.path.dirname(__file__), "trained_weights")
+DEFAULT_RECORDINGS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "recordings")
 
 
 def save_weights(weights: np.ndarray, reward: float | None = None) -> str:
@@ -45,10 +50,12 @@ def lr_scheduler(episode: int, total: int, warmup: int = 50, max_lr: float = 0.0
 
 
 def _start_position_for_episode(episode: int, total: int) -> float:
-    """Curriculum: easy centered starts early, wider range later."""
-    progress = min(1.0, episode / max(total * 0.6, 1))
-    half_range = 0.15 + 0.35 * progress
-    return float(np.random.uniform(-half_range, half_range))
+    """Curriculum: centered starts early, then mostly off-center for correction practice."""
+    progress = min(1.0, episode / max(total * 0.5, 1))
+    half_range = 0.25 + 0.55 * progress
+    if np.random.random() < 0.6:
+        return float(np.random.uniform(-half_range, half_range))
+    return float(np.random.uniform(-0.12, 0.12))
 
 
 def _explore_prob_for_episode(episode: int, total: int, max_prob: float = 0.08) -> float:
@@ -60,20 +67,22 @@ def run_episode(
     max_steps: int = 100,
     start_position: float | None = None,
     explore_prob: float = 0.08,
+    recording_bank: RecordingBank | None = None,
+    real_mix: float = 0.40,
 ) -> tuple[np.ndarray, np.ndarray, float, np.ndarray]:
     if start_position is None:
         start_position = float(np.random.uniform(-0.5, 0.5))
 
     car = CarState(position=start_position)
-    prev_action = 0
+    prev_action = 0.0
     total_reward = 0.0
     spike_history = []
     reward_history = []
     eligibility_history = []
 
     for _ in range(max_steps):
-        sensors = get_camera_sensor_values(car)
-        input_spikes = encode_sensors_to_spikes(sensors, T=NUM_STEPS, p_max=0.2)
+        sensors = get_training_sensors(car, recording_bank, real_mix=real_mix)
+        input_spikes = encode_sensors_to_spikes(sensors, T=NUM_STEPS, p_max=P_MAX)
 
         spikes, _, pathway_history = run_vectorized_lif(
             W=weights,
@@ -84,13 +93,25 @@ def run_episode(
         )
 
         eligibility_history.append(compute_stdp_eligibility(spikes))
-        action = classify_actions(pathway_history)
+        action = compute_steer(
+            pathway_history,
+            window=3,
+            gain=STEER_GAIN,
+            deadzone=STEER_DEADZONE,
+        )
 
         if np.random.random() < explore_prob:
-            action = int(np.random.choice([-1, 0, 1]))
+            action = float(np.random.uniform(-1.0, 1.0))
 
         car.update(action)
-        reward = reward_calculator(car, action, prev_action)
+        reward = reward_calculator(
+            car,
+            action,
+            prev_action,
+            sensors=sensors,
+            penalize_turns=False,
+            proactive_centering=True,
+        )
 
         spike_history.append(spikes[-1, :])
         reward_history.append(reward)
@@ -114,8 +135,11 @@ def train_snn(
     baseline_lr: float = 0.1,
     patience: int = 150,
     min_episodes: int = 200,
+    recording_bank: RecordingBank | None = None,
+    real_mix: float = 0.25,
+    init_weights: np.ndarray | None = None,
 ) -> tuple[np.ndarray, list[float], float]:
-    W = create_weight_matrix(NUM_NEURONS)
+    W = init_weights.copy() if init_weights is not None else create_weight_matrix(NUM_NEURONS)
     baseline = 0.0
     best_reward = -np.inf
     best_weights = W.copy()
@@ -126,7 +150,11 @@ def train_snn(
         start_pos = _start_position_for_episode(episode, num_episodes)
         explore = _explore_prob_for_episode(episode, num_episodes)
         _, reward_history, total_reward, eligibility_history = run_episode(
-            W, start_position=start_pos, explore_prob=explore
+            W,
+            start_position=start_pos,
+            explore_prob=explore,
+            recording_bank=recording_bank,
+            real_mix=real_mix,
         )
         current_lr = lr_scheduler(episode, num_episodes, max_lr=learning_rate)
 

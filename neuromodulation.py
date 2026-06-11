@@ -1,44 +1,104 @@
 import numpy as np 
 
-def classify_actions(pathway_history, pool_size=33, window=10):
+
+def _motor_pool_means(pathway_history, pool_size=None, window=10, num_inputs=3):
+    """Average recent pathway current into left / straight / right motor pools."""
+    if pathway_history.shape[0] < window:
+        recent_activity = pathway_history
+    else:
+        recent_activity = pathway_history[-window:, :]
+
+    features = recent_activity.mean(axis=0)
+    motor = features[num_inputs:]
+    n_motor = len(motor)
+    if n_motor < 3:
+        return 0.0, 0.0, 0.0
+
+    if pool_size is None:
+        base = n_motor // 3
+        rem = n_motor % 3
+        s0 = base + (1 if rem > 0 else 0)
+        s1 = base + (1 if rem > 1 else 0)
+        left_pool = motor[:s0].mean()
+        straight_pool = motor[s0 : s0 + s1].mean()
+        right_pool = motor[s0 + s1 :].mean()
+    else:
+        end = min(3 * pool_size, n_motor)
+        motor = motor[:end]
+        left_pool = motor[0:pool_size].mean()
+        straight_pool = motor[pool_size : 2 * pool_size].mean()
+        right_pool = motor[2 * pool_size : 3 * pool_size].mean()
+
+    return float(left_pool), float(straight_pool), float(right_pool)
+
+
+def compute_steer(
+    pathway_history,
+    pool_size=None,
+    window=10,
+    num_inputs=3,
+    gain: float = 12000.0,
+    deadzone: float = 0.08,
+) -> float:
+    """
+    Continuous steer in [-1, 1].
+
+    Positive = steer right (left wheel faster), negative = steer left.
+    Pool 0 tracks left-sensor pathways; pool 2 tracks right-sensor pathways.
+    """
+    left_pool, _straight_pool, right_pool = _motor_pool_means(
+        pathway_history, pool_size=pool_size, window=window, num_inputs=num_inputs
+    )
+    lateral = left_pool - right_pool
+    steer = float(np.tanh(gain * lateral))
+    if abs(steer) < deadzone:
+        return 0.0
+    return steer
+
+
+def classify_actions(pathway_history, pool_size=None, window=10, num_inputs=3):
     """
     Map neural pathway patterns to discrete actions 
         Params:
             Pathway_history (T N) array - synaptic currents from SNN
-            pool_size: int - neuron per motor pools 
+            pool_size: neurons per motor pool on hidden layer (default: auto from motor count)
             window: int - recent timesteps to average default to 10
+            num_inputs: sensor input neurons to exclude from motor pools (default 3)
     returns: 
         actions: -1 (left), 0 (straight), +1 (right)
     """
 
-    # get last window timesteps 
-    if pathway_history.shape[0] < window:
-        recent_activity = pathway_history 
-    else: 
-        recent_activity = pathway_history[-window:, :] # [row 90-99, all columns]
-    
-    features = recent_activity.mean(axis=0)
-    # split into motor pools 
-    left_pool_activity = features[0:pool_size].mean() # slice from 0 to 33, average into single number
-    straight_pool_activity = features[pool_size:2*pool_size].mean()
-    right_pool_activity = features[2*pool_size:].mean()
+    steer = compute_steer(
+        pathway_history,
+        pool_size=pool_size,
+        window=window,
+        num_inputs=num_inputs,
+        deadzone=0.15,
+    )
+    if steer > 0.15:
+        return 1
+    if steer < -0.15:
+        return -1
+    return 0
 
-    pool_scores = [left_pool_activity, straight_pool_activity, right_pool_activity]
-    winning_pool = np.argmax(pool_scores)
-
-    # convert motor pools into actions 
-    action_map = {0: -1, 1: 0, 2: 1} 
-    action = action_map[winning_pool]
-
-    return action 
-
-def reward_calculator(car_state, action, prev_action=0):
+def reward_calculator(
+    car_state,
+    action,
+    prev_action=0,
+    *,
+    sensors=None,
+    penalize_turns: bool = True,
+    proactive_centering: bool = False,
+):
     """
     Calculate reward signal based on car performance (IMPROVED SHAPING)
         Params:
             car_state: CarState object with position, speed, crash status 
             action: current action (-1, 0, 1)
-            prev_action: previous action 
+            prev_action: previous action
+            sensors: optional [left, center, right] for corrective-turn bonus
+            penalize_turns: if True, small penalty for any non-straight action
+            proactive_centering: if True, penalize drift before reaching lane edge
     Returns: 
         reward: float (improved incremental feedback)
     """
@@ -65,9 +125,17 @@ def reward_calculator(car_state, action, prev_action=0):
     action_change = abs(action - prev_action)
     reward -= action_change * 0.1  # Increased from 0.05 to 0.1 (stronger smoothness incentive)
 
-    # penalize constant turning 
-    if action != 0: 
+    if penalize_turns and action != 0:
         reward -= 0.05
+
+    if proactive_centering and centering_error > 0.3:
+        reward -= (centering_error - 0.3) * 1.5
+
+    if sensors is not None and action != 0:
+        left, _, right = sensors
+        imbalance = left - right
+        if (imbalance > 0.15 and action == 1) or (imbalance < -0.15 and action == -1):
+            reward += 0.3
     
     # Penalty for being far from center (progressive)
     if centering_error > 0.7:  # Very close to edge

@@ -21,7 +21,8 @@ from yahboom.client import RaspbotClient
 from yahboom.protocol import DEFAULT_CMD_PORT, DEFAULT_OBS_PORT, RobotCommand
 
 from .rerun_viz import init_rerun, log_camera_snn
-from .vision import FrameLaneSensor, annotate_debug_frame, interpret_lane_state
+from .sensors import add_lane_sensor_args, build_lane_sensor
+from .vision import annotate_debug_frame, interpret_lane_state
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ def main() -> None:
     parser.add_argument("--cmd-port", type=int, default=DEFAULT_CMD_PORT)
     parser.add_argument("--obs-port", type=int, default=DEFAULT_OBS_PORT)
     parser.add_argument("--hz", type=float, default=10.0)
+    parser.add_argument("--sensor-window", type=int, default=5)
     parser.add_argument("--threshold", type=int, default=60, help="Dark-tape threshold (black tape only)")
     parser.add_argument(
         "--tape-color",
@@ -45,6 +47,7 @@ def main() -> None:
         default="auto",
         help="Tape detection: auto=purple+black (default), purple, dark",
     )
+    add_lane_sensor_args(parser)
     parser.add_argument("--connect-timeout-s", type=float, default=5.0)
     parser.add_argument("--no-rerun", action="store_true")
     args = parser.parse_args()
@@ -76,7 +79,10 @@ def main() -> None:
     if not args.no_rerun:
         init_rerun("camera_vision_debug")
 
-    sensor = FrameLaneSensor(window_size=5, threshold=args.threshold, tape_color=args.tape_color)
+    if args.sensor_backend == "cv" and not args.cv_model:
+        print("--sensor-backend cv requires --cv-model path/to/best.pt", file=sys.stderr)
+        sys.exit(1)
+    sensor = build_lane_sensor(args)
     period = 1.0 / args.hz
     step = 0
 
@@ -102,6 +108,8 @@ def main() -> None:
                     sensor.last_column_darkness,
                     threshold=args.threshold,
                     tape_color=args.tape_color,
+                    cv_lane_mask=sensor.lane_mask_for_debug(frame),
+                    backend_label=sensor.last_backend_used,
                 )
                 log_camera_snn(
                     frame_idx=step,

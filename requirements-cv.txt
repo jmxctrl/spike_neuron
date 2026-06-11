@@ -1,0 +1,3 @@
+# Optional: YOLOv8 segmentation lane sensors (--sensor-backend cv)
+-r requirements.txt
+ultralytics>=8.0.0
