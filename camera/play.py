@@ -23,7 +23,7 @@ import time
 from yahboom.client import RaspbotClient
 from yahboom.protocol import DEFAULT_CMD_PORT, DEFAULT_FPS, DEFAULT_OBS_PORT, RobotCommand
 
-from .controller import ACTION_LEFT, ACTION_RIGHT, ACTION_STRAIGHT, CameraSNNController
+from .controller import ACTION_LEFT, ACTION_RIGHT, ACTION_STRAIGHT, CameraSNNController, InferenceConfig
 from .lap_controller import LapController
 from .remote_driver import YahboomRemoteDriver
 from .rerun_viz import init_rerun, log_camera_snn
@@ -62,6 +62,36 @@ def main() -> None:
     parser.add_argument("--cmd-port", type=int, default=DEFAULT_CMD_PORT)
     parser.add_argument("--obs-port", type=int, default=DEFAULT_OBS_PORT)
     parser.add_argument("--hz", type=float, default=15.0, help="Control loop rate")
+    parser.add_argument(
+        "--sensor-window",
+        type=int,
+        default=5,
+        help="Median filter window for lane sensors (lower = faster reaction)",
+    )
+    parser.add_argument(
+        "--action-window",
+        type=int,
+        default=10,
+        help="SNN pathway timesteps averaged for action (lower = faster reaction)",
+    )
+    parser.add_argument(
+        "--p-max",
+        type=float,
+        default=0.2,
+        help="Max spike probability per sensor timestep (higher = stronger input)",
+    )
+    parser.add_argument(
+        "--lif-tau",
+        type=float,
+        default=20.0,
+        help="LIF membrane time constant (lower = faster neuron response)",
+    )
+    parser.add_argument(
+        "--lif-threshold",
+        type=float,
+        default=1.0,
+        help="LIF spike threshold (lower = easier firing)",
+    )
     parser.add_argument("--threshold", type=int, default=60, help="Lane tape threshold (purple side lines)")
     parser.add_argument(
         "--tape-color",
@@ -115,6 +145,11 @@ def main() -> None:
     print(f"Robot:   {args.remote_ip}")
     print(f"Weights: {weights_path}")
     print(f"Speed:   base={args.base_speed} steer={args.steer_delta}")
+    print(
+        f"SNN:     sensor_window={args.sensor_window} hz={args.hz} "
+        f"action_window={args.action_window} p_max={args.p_max} "
+        f"lif_tau={args.lif_tau} lif_threshold={args.lif_threshold}"
+    )
     if args.no_drive:
         print("Mode:    DEBUG (motors disabled)")
     elif not args.no_ping_pong:
@@ -138,8 +173,16 @@ def main() -> None:
     if not args.no_rerun:
         init_rerun("camera_snn_deploy")
 
-    sensor = FrameLaneSensor(window_size=5, threshold=args.threshold, tape_color=args.tape_color)
-    controller = CameraSNNController(weights_path)
+    sensor = FrameLaneSensor(
+        window_size=args.sensor_window, threshold=args.threshold, tape_color=args.tape_color
+    )
+    inference_config = InferenceConfig(
+        p_max=args.p_max,
+        action_window=args.action_window,
+        lif_tau=args.lif_tau,
+        lif_threshold=args.lif_threshold,
+    )
+    controller = CameraSNNController(weights_path, config=inference_config)
     driver = YahboomRemoteDriver(client, base_speed=args.base_speed, steer_delta=args.steer_delta)
     lap: LapController | None = None
     if not args.no_ping_pong and not args.no_drive:

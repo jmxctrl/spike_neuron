@@ -32,13 +32,24 @@ def classify_actions(pathway_history, pool_size=33, window=10):
 
     return action 
 
-def reward_calculator(car_state, action, prev_action=0):
+def reward_calculator(
+    car_state,
+    action,
+    prev_action=0,
+    *,
+    sensors=None,
+    penalize_turns: bool = True,
+    proactive_centering: bool = False,
+):
     """
     Calculate reward signal based on car performance (IMPROVED SHAPING)
         Params:
             car_state: CarState object with position, speed, crash status 
             action: current action (-1, 0, 1)
-            prev_action: previous action 
+            prev_action: previous action
+            sensors: optional [left, center, right] for corrective-turn bonus
+            penalize_turns: if True, small penalty for any non-straight action
+            proactive_centering: if True, penalize drift before reaching lane edge
     Returns: 
         reward: float (improved incremental feedback)
     """
@@ -65,9 +76,17 @@ def reward_calculator(car_state, action, prev_action=0):
     action_change = abs(action - prev_action)
     reward -= action_change * 0.1  # Increased from 0.05 to 0.1 (stronger smoothness incentive)
 
-    # penalize constant turning 
-    if action != 0: 
+    if penalize_turns and action != 0:
         reward -= 0.05
+
+    if proactive_centering and centering_error > 0.3:
+        reward -= (centering_error - 0.3) * 1.5
+
+    if sensors is not None and action != 0:
+        left, _, right = sensors
+        imbalance = left - right
+        if (imbalance > 0.15 and action == 1) or (imbalance < -0.15 and action == -1):
+            reward += 0.3
     
     # Penalty for being far from center (progressive)
     if centering_error > 0.7:  # Very close to edge

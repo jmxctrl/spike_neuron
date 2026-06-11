@@ -45,10 +45,12 @@ def lr_scheduler(episode: int, total: int, warmup: int = 50, max_lr: float = 0.0
 
 
 def _start_position_for_episode(episode: int, total: int) -> float:
-    """Curriculum: easy centered starts early, wider range later."""
-    progress = min(1.0, episode / max(total * 0.6, 1))
-    half_range = 0.15 + 0.35 * progress
-    return float(np.random.uniform(-half_range, half_range))
+    """Curriculum: centered starts early, then mostly off-center for correction practice."""
+    progress = min(1.0, episode / max(total * 0.5, 1))
+    half_range = 0.25 + 0.55 * progress
+    if np.random.random() < 0.6:
+        return float(np.random.uniform(-half_range, half_range))
+    return float(np.random.uniform(-0.12, 0.12))
 
 
 def _explore_prob_for_episode(episode: int, total: int, max_prob: float = 0.08) -> float:
@@ -90,7 +92,14 @@ def run_episode(
             action = int(np.random.choice([-1, 0, 1]))
 
         car.update(action)
-        reward = reward_calculator(car, action, prev_action)
+        reward = reward_calculator(
+            car,
+            action,
+            prev_action,
+            sensors=sensors,
+            penalize_turns=False,
+            proactive_centering=True,
+        )
 
         spike_history.append(spikes[-1, :])
         reward_history.append(reward)
