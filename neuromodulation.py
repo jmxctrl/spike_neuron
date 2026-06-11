@@ -1,12 +1,13 @@
 import numpy as np 
 
-def classify_actions(pathway_history, pool_size=33, window=10):
+def classify_actions(pathway_history, pool_size=None, window=10, num_inputs=3):
     """
     Map neural pathway patterns to discrete actions 
         Params:
             Pathway_history (T N) array - synaptic currents from SNN
-            pool_size: int - neuron per motor pools 
+            pool_size: neurons per motor pool on hidden layer (default: auto from motor count)
             window: int - recent timesteps to average default to 10
+            num_inputs: sensor input neurons to exclude from motor pools (default 3)
     returns: 
         actions: -1 (left), 0 (straight), +1 (right)
     """
@@ -18,19 +19,37 @@ def classify_actions(pathway_history, pool_size=33, window=10):
         recent_activity = pathway_history[-window:, :] # [row 90-99, all columns]
     
     features = recent_activity.mean(axis=0)
-    # split into motor pools 
-    left_pool_activity = features[0:pool_size].mean() # slice from 0 to 33, average into single number
-    straight_pool_activity = features[pool_size:2*pool_size].mean()
-    right_pool_activity = features[2*pool_size:].mean()
+    motor = features[num_inputs:]
+    n_motor = len(motor)
+    if n_motor < 3:
+        return 0
 
-    pool_scores = [left_pool_activity, straight_pool_activity, right_pool_activity]
-    winning_pool = np.argmax(pool_scores)
+    if pool_size is None:
+        base = n_motor // 3
+        rem = n_motor % 3
+        s0 = base + (1 if rem > 0 else 0)
+        s1 = base + (1 if rem > 1 else 0)
+        left_pool_activity = motor[:s0].mean()
+        straight_pool_activity = motor[s0 : s0 + s1].mean()
+        right_pool_activity = motor[s0 + s1 :].mean()
+    else:
+        end = min(3 * pool_size, n_motor)
+        motor = motor[:end]
+        left_pool_activity = motor[0:pool_size].mean()
+        straight_pool_activity = motor[pool_size : 2 * pool_size].mean()
+        right_pool_activity = motor[2 * pool_size : 3 * pool_size].mean()
 
-    # convert motor pools into actions 
-    action_map = {0: -1, 1: 0, 2: 1} 
-    action = action_map[winning_pool]
-
-    return action 
+    # Pool 0/2 track left/right sensor pathways; steer away from the hot side.
+    if (
+        straight_pool_activity > left_pool_activity
+        and straight_pool_activity > right_pool_activity
+    ):
+        return 0
+    if left_pool_activity > right_pool_activity:
+        return 1
+    if right_pool_activity > left_pool_activity:
+        return -1
+    return 0
 
 def reward_calculator(
     car_state,

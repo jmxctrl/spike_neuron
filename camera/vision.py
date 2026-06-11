@@ -246,8 +246,20 @@ def corridor_visible(sensors: list[float]) -> bool:
     return False
 
 
+def is_facing_corridor(sensors: list[float]) -> bool:
+    """True when both lane lines are visible and heading is roughly down-corridor."""
+    left, center, right = sensors
+    if left < 0.12 or right < 0.12:
+        return False
+    if abs(left - right) > 0.32:
+        return False
+    return center >= 0.22
+
+
 def is_recovery_complete(sensors: list[float]) -> bool:
     """True when good enough to hand back to full-speed SNN."""
+    if not is_facing_corridor(sensors):
+        return False
     left, center, right = sensors
     if is_lane_centered(sensors):
         return True

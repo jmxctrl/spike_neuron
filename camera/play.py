@@ -61,35 +61,35 @@ def main() -> None:
     parser.add_argument("--weights", type=str, default=None, help="Path to .npy weights")
     parser.add_argument("--cmd-port", type=int, default=DEFAULT_CMD_PORT)
     parser.add_argument("--obs-port", type=int, default=DEFAULT_OBS_PORT)
-    parser.add_argument("--hz", type=float, default=15.0, help="Control loop rate")
+    parser.add_argument("--hz", type=float, default=25.0, help="Control loop rate")
     parser.add_argument(
         "--sensor-window",
         type=int,
-        default=5,
+        default=2,
         help="Median filter window for lane sensors (lower = faster reaction)",
     )
     parser.add_argument(
         "--action-window",
         type=int,
-        default=10,
+        default=3,
         help="SNN pathway timesteps averaged for action (lower = faster reaction)",
     )
     parser.add_argument(
         "--p-max",
         type=float,
-        default=0.2,
+        default=0.35,
         help="Max spike probability per sensor timestep (higher = stronger input)",
     )
     parser.add_argument(
         "--lif-tau",
         type=float,
-        default=20.0,
+        default=10.0,
         help="LIF membrane time constant (lower = faster neuron response)",
     )
     parser.add_argument(
         "--lif-threshold",
         type=float,
-        default=1.0,
+        default=0.8,
         help="LIF spike threshold (lower = easier firing)",
     )
     parser.add_argument("--threshold", type=int, default=60, help="Lane tape threshold (purple side lines)")
@@ -116,13 +116,31 @@ def main() -> None:
     parser.add_argument("--connect-timeout-s", type=float, default=5.0)
     parser.add_argument("--no-rerun", action="store_true", help="Disable Rerun viewer")
     parser.add_argument("--no-drive", action="store_true", help="Debug only: do not send motor commands")
-    parser.add_argument("--no-ping-pong", action="store_true", help="Disable end-line 180° turn laps")
-    parser.add_argument("--turn-speed", type=int, default=45, help="In-place turn speed")
+    parser.add_argument("--ping-pong", action="store_true", help="Enable end-line 180° turn laps (off by default)")
+    parser.add_argument("--turn-speed", type=int, default=32, help="In-place turn speed (lower = less tipping)")
     parser.add_argument(
-        "--turn-seconds",
+        "--turn-min-seconds",
         type=float,
-        default=3.0,
-        help="Spin duration for ~180° (2.0s ≈ 120° on Yahboom; use 3.0 for full 180°)",
+        default=1.4,
+        help="Minimum spin time before vision can end the turn",
+    )
+    parser.add_argument(
+        "--turn-max-seconds",
+        type=float,
+        default=5.5,
+        help="Maximum spin time (safety cap if corridor not detected)",
+    )
+    parser.add_argument(
+        "--facing-confirm-frames",
+        type=int,
+        default=5,
+        help="Consecutive frames facing corridor before stopping turn",
+    )
+    parser.add_argument(
+        "--turn-settle-seconds",
+        type=float,
+        default=0.5,
+        help="Pause after turn before slow center creep",
     )
     parser.add_argument("--end-confirm-frames", type=int, default=6, help="End-line frames before turn")
     parser.add_argument("--recover-speed-scale", type=float, default=0.35, help="Slow forward speed after turn")
@@ -152,8 +170,10 @@ def main() -> None:
     )
     if args.no_drive:
         print("Mode:    DEBUG (motors disabled)")
-    elif not args.no_ping_pong:
+    elif args.ping_pong:
         print("Mode:    PING-PONG (turn 180° at end bar, repeat forever)")
+    else:
+        print("Mode:    CRUISE (lane follow only, no 180° turns)")
     print("Ctrl+C to stop.\n")
 
     client = RaspbotClient(
@@ -185,11 +205,14 @@ def main() -> None:
     controller = CameraSNNController(weights_path, config=inference_config)
     driver = YahboomRemoteDriver(client, base_speed=args.base_speed, steer_delta=args.steer_delta)
     lap: LapController | None = None
-    if not args.no_ping_pong and not args.no_drive:
+    if args.ping_pong and not args.no_drive:
         lap = LapController(
             driver,
             turn_speed=args.turn_speed,
-            turn_seconds=args.turn_seconds,
+            turn_min_seconds=args.turn_min_seconds,
+            turn_max_seconds=args.turn_max_seconds,
+            facing_confirm_frames=args.facing_confirm_frames,
+            turn_settle_seconds=args.turn_settle_seconds,
             end_confirm_frames=args.end_confirm_frames,
             recover_speed_scale=args.recover_speed_scale,
             recover_center_frames=args.recover_center_frames,
@@ -221,7 +244,7 @@ def main() -> None:
                 status = lap_result.status
                 speed_scale = lap_result.speed_scale
                 end_line = lap.last_end_line
-            elif not args.no_ping_pong:
+            elif args.ping_pong:
                 end_line = detect_end_line(
                     frame if frame is not None else None,
                     bottom_fraction=args.end_zone_fraction,

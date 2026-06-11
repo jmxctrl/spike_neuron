@@ -9,20 +9,57 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .train import save_weights, train_snn
+from .lcr_data import RecordingBank
+from .train import DEFAULT_RECORDINGS_DIR, save_weights, train_snn
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train SNN for camera corridor following")
     parser.add_argument("--episodes", type=int, default=500)
     parser.add_argument("--lr", type=float, default=0.01)
+    parser.add_argument(
+        "--recordings-dir",
+        type=str,
+        default=DEFAULT_RECORDINGS_DIR,
+        help="Directory with lcr_*.csv logs for sim-real calibration",
+    )
+    parser.add_argument(
+        "--real-mix",
+        type=float,
+        default=0.25,
+        help="Fraction of training steps using recorded sensors",
+    )
+    parser.add_argument("--no-recordings", action="store_true", help="Sim only, ignore CSV logs")
+    parser.add_argument(
+        "--init-weights",
+        type=str,
+        default=None,
+        help="Fine-tune from an existing .npy instead of random init",
+    )
     args = parser.parse_args()
+
+    bank: RecordingBank | None = None
+    if not args.no_recordings and os.path.isdir(args.recordings_dir):
+        bank = RecordingBank.from_dir(args.recordings_dir)
+        print(f"Loaded {len(bank)} recorded sensor samples from {args.recordings_dir}")
+    else:
+        print("Training with sim-only sensors (no recordings)")
 
     print("=" * 60)
     print("TRAINING CAMERA CORRIDOR SNN")
     print("=" * 60)
 
-    weights, rewards, best_reward = train_snn(num_episodes=args.episodes, learning_rate=args.lr)
+    init_w = np.load(args.init_weights) if args.init_weights else None
+    if init_w is not None:
+        print(f"Fine-tuning from {args.init_weights}")
+
+    weights, rewards, best_reward = train_snn(
+        num_episodes=args.episodes,
+        learning_rate=args.lr,
+        recording_bank=bank,
+        real_mix=args.real_mix,
+        init_weights=init_w,
+    )
     path = save_weights(weights, reward=best_reward)
     print(f"\nSaved weights: {path}")
     print(f"Best reward: {best_reward:.2f}, mean last 20: {np.mean(rewards[-20:]):.2f}")

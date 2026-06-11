@@ -19,14 +19,13 @@ ACTION_RIGHT = 1
 
 @dataclass
 class InferenceConfig:
-    """Runtime SNN inference knobs (defaults match original deploy)."""
+    """Runtime SNN inference knobs."""
 
     num_steps: int = NUM_STEPS
-    p_max: float = 0.2
-    action_window: int = 10
-    pool_size: int = 33
-    lif_tau: float = 20.0
-    lif_threshold: float = 1.0
+    p_max: float = 0.35
+    action_window: int = 3
+    lif_tau: float = 10.0
+    lif_threshold: float = 0.8
 
 
 class CameraSNNController:
@@ -55,7 +54,5 @@ class CameraSNNController:
             plot=False,
         )
 
-        self.last_action = int(
-            classify_actions(pathway_history, pool_size=cfg.pool_size, window=cfg.action_window)
-        )
+        self.last_action = int(classify_actions(pathway_history, window=cfg.action_window))
         return self.last_action, self.last_sensors
