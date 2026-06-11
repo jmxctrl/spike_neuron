@@ -246,9 +246,42 @@ def corridor_visible(sensors: list[float]) -> bool:
     return False
 
 
-def is_facing_corridor(sensors: list[float]) -> bool:
-    """True when both lane lines are visible and heading is roughly down-corridor."""
+def is_tape_lost(sensors: list[float]) -> bool:
+    """True when no lane tape is visible ahead (corridor physically ended)."""
     left, center, right = sensors
+    return left < 0.12 and right < 0.12 and center < 0.25
+
+
+def is_dead_end(sensors: list[float]) -> bool:
+    """One-sided tape reading (drift), NOT a turn trigger — used only for post-turn steering."""
+    left, center, right = sensors
+    one_sided = (left >= 0.70 and right < 0.20) or (right >= 0.70 and left < 0.20)
+    no_path = center < 0.30
+    return one_sided and no_path
+
+
+def is_post_turn_ready(sensors: list[float]) -> bool:
+    """After a 180° spin, good enough to creep forward / hand back to SNN."""
+    if is_dead_end(sensors):
+        return False
+    if is_facing_corridor(sensors):
+        return True
+    left, center, right = sensors
+    if left >= 0.12 and right >= 0.12:
+        return True
+    if center >= 0.30:
+        return True
+    return max(left, right) >= 0.15
+
+
+def is_facing_corridor(sensors: list[float]) -> bool:
+    """True when heading down-corridor (both lines visible, or centered between them)."""
+    if is_lane_centered(sensors):
+        return True
+    left, center, right = sensors
+    # CV masks often land in the center column when centered; sides stay low.
+    if center >= 0.50 and left < 0.40 and right < 0.40:
+        return True
     if left < 0.12 or right < 0.12:
         return False
     if abs(left - right) > 0.32:
@@ -258,11 +291,13 @@ def is_facing_corridor(sensors: list[float]) -> bool:
 
 def is_recovery_complete(sensors: list[float]) -> bool:
     """True when good enough to hand back to full-speed SNN."""
-    if not is_facing_corridor(sensors):
-        return False
-    left, center, right = sensors
     if is_lane_centered(sensors):
         return True
+    left, center, right = sensors
+    if center >= 0.50 and left < 0.40 and right < 0.40:
+        return True
+    if not is_facing_corridor(sensors):
+        return False
     if center >= 0.38 and abs(left - right) < 0.30:
         return True
     if left >= 0.10 and right >= 0.10 and abs(left - right) < 0.22:
@@ -316,6 +351,8 @@ def annotate_debug_frame(
     threshold: int = 60,
     roi_fraction: float = 0.45,
     tape_color: str = "auto",
+    cv_lane_mask: np.ndarray | None = None,
+    backend_label: str | None = None,
     end_line: EndLineResult | None = None,
     end_line_fraction: float = 0.20,
     end_tape_color: str = "dark",
@@ -346,10 +383,15 @@ def annotate_debug_frame(
 
     y0 = int(h * (1.0 - roi_fraction))
 
-    tape_mask = tape_mask_for_roi(bgr, roi_fraction=roi_fraction, tape_color=tape_color, threshold=threshold)
-    overlay = bgr.copy()
-    overlay[tape_mask > 0] = (180, 0, 220)
-    bgr = cv2.addWeighted(bgr, 0.72, overlay, 0.28, 0)
+    if cv_lane_mask is not None and cv_lane_mask.shape[:2] == (h, w):
+        overlay = bgr.copy()
+        overlay[cv_lane_mask > 0] = (180, 0, 220)
+        bgr = cv2.addWeighted(bgr, 0.72, overlay, 0.28, 0)
+    else:
+        tape_mask = tape_mask_for_roi(bgr, roi_fraction=roi_fraction, tape_color=tape_color, threshold=threshold)
+        overlay = bgr.copy()
+        overlay[tape_mask > 0] = (180, 0, 220)
+        bgr = cv2.addWeighted(bgr, 0.72, overlay, 0.28, 0)
 
     third = w // 3
     colors = [(80, 80, 255), (80, 255, 80), (255, 80, 80)]
@@ -382,7 +424,8 @@ def annotate_debug_frame(
         cv2.rectangle(bgr, (x, base_y - filled), (x + bar_w, base_y), colors[i], -1)
 
     state = interpret_lane_state(sensors)
-    cv2.putText(bgr, state, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+    title = state if not backend_label else f"{state}  [{backend_label}]"
+    cv2.putText(bgr, title, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
     if action is not None:
         if isinstance(action, (int, float)):

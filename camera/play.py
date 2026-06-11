@@ -28,7 +28,8 @@ from .lap_controller import LapController
 from .remote_driver import YahboomRemoteDriver
 from .rerun_viz import init_rerun, log_camera_snn
 from .train import WEIGHTS_DIR, list_weights
-from .vision import FrameLaneSensor, annotate_debug_frame, detect_end_line, interpret_lane_state
+from .sensors import add_lane_sensor_args, build_lane_sensor
+from .vision import annotate_debug_frame, interpret_lane_state
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,7 @@ def main() -> None:
         default="auto",
         help="Side lane lines: auto=purple+black (default)",
     )
+    add_lane_sensor_args(parser)
     parser.add_argument(
         "--end-threshold",
         type=int,
@@ -132,35 +134,38 @@ def main() -> None:
     parser.add_argument("--no-rerun", action="store_true", help="Disable Rerun viewer")
     parser.add_argument("--no-drive", action="store_true", help="Debug only: do not send motor commands")
     parser.add_argument("--ping-pong", action="store_true", help="Enable end-line 180° turn laps (off by default)")
-    parser.add_argument("--turn-speed", type=int, default=32, help="In-place turn speed (lower = less tipping)")
+    parser.add_argument("--turn-speed", type=int, default=40, help="In-place turn speed (lower = less tipping)")
     parser.add_argument(
-        "--turn-min-seconds",
+        "--turn-180-seconds",
         type=float,
-        default=1.4,
-        help="Minimum spin time before vision can end the turn",
+        default=3.0,
+        help="Spin duration for a full 180° turnaround",
     )
     parser.add_argument(
         "--turn-max-seconds",
         type=float,
-        default=5.5,
-        help="Maximum spin time (safety cap if corridor not detected)",
-    )
-    parser.add_argument(
-        "--facing-confirm-frames",
-        type=int,
-        default=5,
-        help="Consecutive frames facing corridor before stopping turn",
+        default=5.0,
+        help="Maximum spin time (safety cap)",
     )
     parser.add_argument(
         "--turn-settle-seconds",
         type=float,
         default=0.5,
-        help="Pause after turn before slow center creep",
+        help="Pause after turn before driving back",
     )
-    parser.add_argument("--end-confirm-frames", type=int, default=6, help="End-line frames before turn")
-    parser.add_argument("--recover-speed-scale", type=float, default=0.35, help="Slow forward speed after turn")
-    parser.add_argument("--recover-center-frames", type=int, default=12, help="Good-enough frames before full speed")
-    parser.add_argument("--end-lockout-seconds", type=float, default=4.0, help="Ignore end bar after recovery")
+    parser.add_argument("--end-confirm-frames", type=int, default=4, help="Black bar frames before turn")
+    parser.add_argument(
+        "--tape-lost-confirm-frames",
+        type=int,
+        default=10,
+        help="Frames with no tape visible before turn (corridor end)",
+    )
+    parser.add_argument(
+        "--post-turn-grace-seconds",
+        type=float,
+        default=8.0,
+        help="After 180° turn, ignore end triggers and drive straight this long",
+    )
     parser.add_argument("--end-zone-fraction", type=float, default=0.20, help="Bottom fraction for end bar")
     parser.add_argument("--iterations", type=int, default=0, help="0 = run until Ctrl+C")
     args = parser.parse_args()
@@ -177,6 +182,7 @@ def main() -> None:
     print("=" * 60)
     print(f"Robot:   {args.remote_ip}")
     print(f"Weights: {weights_path}")
+    print(f"Sensors: backend={args.sensor_backend}" + (f" model={args.cv_model}" if args.cv_model else ""))
     print(f"Speed:   base={args.base_speed} steer={args.steer_delta}")
     print(
         f"SNN:     sensor_window={args.sensor_window} hz={args.hz} "
@@ -209,9 +215,10 @@ def main() -> None:
     if not args.no_rerun:
         init_rerun("camera_snn_deploy")
 
-    sensor = FrameLaneSensor(
-        window_size=args.sensor_window, threshold=args.threshold, tape_color=args.tape_color
-    )
+    if args.sensor_backend == "cv" and not args.cv_model:
+        print("--sensor-backend cv requires --cv-model path/to/best.pt", file=sys.stderr)
+        sys.exit(1)
+    sensor = build_lane_sensor(args)
     inference_config = InferenceConfig(
         p_max=args.p_max,
         action_window=args.action_window,
@@ -222,24 +229,28 @@ def main() -> None:
     )
     controller = CameraSNNController(weights_path, config=inference_config)
     driver = YahboomRemoteDriver(client, base_speed=args.base_speed, steer_delta=args.steer_delta)
+
+    def _end_line(frame):
+        return sensor.detect_end_line(
+            frame,
+            bottom_fraction=args.end_zone_fraction,
+            end_tape_color=args.end_tape_color,
+            end_threshold=args.end_threshold,
+        )
+
     lap: LapController | None = None
     if args.ping_pong and not args.no_drive:
         lap = LapController(
             driver,
             turn_speed=args.turn_speed,
-            turn_min_seconds=args.turn_min_seconds,
+            turn_180_seconds=args.turn_180_seconds,
             turn_max_seconds=args.turn_max_seconds,
-            facing_confirm_frames=args.facing_confirm_frames,
             turn_settle_seconds=args.turn_settle_seconds,
             end_confirm_frames=args.end_confirm_frames,
-            recover_speed_scale=args.recover_speed_scale,
-            recover_center_frames=args.recover_center_frames,
-            end_lockout_seconds=args.end_lockout_seconds,
+            tape_lost_confirm_frames=args.tape_lost_confirm_frames,
+            post_turn_grace_seconds=args.post_turn_grace_seconds,
             bottom_fraction=args.end_zone_fraction,
-            tape_color=args.tape_color,
-            threshold=args.threshold,
-            end_tape_color=args.end_tape_color,
-            end_threshold=args.end_threshold,
+            end_line_fn=_end_line,
         )
 
     period = 1.0 / args.hz
@@ -263,12 +274,7 @@ def main() -> None:
                 speed_scale = lap_result.speed_scale
                 end_line = lap.last_end_line
             elif args.ping_pong:
-                end_line = detect_end_line(
-                    frame if frame is not None else None,
-                    bottom_fraction=args.end_zone_fraction,
-                    tape_color=args.end_tape_color,
-                    threshold=args.end_threshold,
-                )
+                end_line = _end_line(frame)
                 speed_scale = 1.0
             else:
                 end_line = None
@@ -278,8 +284,12 @@ def main() -> None:
                 if steer is not None:
                     if lap is not None and lap_result.slow_center:
                         driver.execute_recovery(steer, speed_scale=speed_scale)
+                    elif speed_scale <= 0.05:
+                        driver.stop()
                     else:
                         driver.execute_steer(steer, speed_scale=speed_scale)
+                elif lap is None or lap.phase.value != "TURNING":
+                    driver.stop()
             else:
                 client.send_command(RobotCommand(movement="stop"))
 
@@ -299,6 +309,8 @@ def main() -> None:
                     action=steer if steer is not None else ACTION_STRAIGHT,
                     threshold=args.threshold,
                     tape_color=args.tape_color,
+                    cv_lane_mask=sensor.lane_mask_for_debug(frame),
+                    backend_label=sensor.last_backend_used,
                     end_line=end_line,
                     end_line_fraction=args.end_zone_fraction,
                     end_tape_color=args.end_tape_color,

@@ -11,3 +11,5 @@ __pycache__/
 .env.test
 .env.production
 .env.local
+camera/models/*.pt
+datasets/

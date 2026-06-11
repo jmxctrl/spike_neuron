@@ -28,7 +28,8 @@ from yahboom.protocol import DEFAULT_CMD_PORT, DEFAULT_OBS_PORT, RobotCommand
 
 from .controller import CameraSNNController, InferenceConfig
 from .remote_driver import YahboomRemoteDriver
-from .vision import FrameLaneSensor, interpret_lane_state
+from .sensors import add_lane_sensor_args, build_lane_sensor
+from .vision import interpret_lane_state
 
 
 def main() -> None:
@@ -43,6 +44,7 @@ def main() -> None:
     parser.add_argument("--sensor-window", type=int, default=5)
     parser.add_argument("--threshold", type=int, default=60)
     parser.add_argument("--tape-color", choices=["auto", "purple", "dark"], default="auto")
+    add_lane_sensor_args(parser)
     parser.add_argument("--weights", type=str, default=None, help="Optional: run SNN and log actions")
     parser.add_argument("--action-window", type=int, default=3)
     parser.add_argument("--p-max", type=float, default=0.35)
@@ -82,9 +84,10 @@ def main() -> None:
         print(exc, file=sys.stderr)
         sys.exit(1)
 
-    sensor = FrameLaneSensor(
-        window_size=args.sensor_window, threshold=args.threshold, tape_color=args.tape_color
-    )
+    if args.sensor_backend == "cv" and not args.cv_model:
+        print("--sensor-backend cv requires --cv-model path/to/best.pt", file=sys.stderr)
+        sys.exit(1)
+    sensor = build_lane_sensor(args)
     controller: CameraSNNController | None = None
     driver: YahboomRemoteDriver | None = None
 
